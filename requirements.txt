@@ -1,0 +1,11 @@
+aiogram>=3.13,<4
+APScheduler>=3.10,<4
+asyncpg>=0.29,<1
+fastapi>=0.115,<1
+openai>=1.60,<3
+pydantic-settings>=2.6,<3
+SQLAlchemy>=2.0,<3
+Telethon>=1.37,<2
+tzdata>=2025.2
+uvicorn[standard]>=0.32,<1
+pytest>=8.3,<9
