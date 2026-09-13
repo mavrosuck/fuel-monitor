@@ -193,9 +193,9 @@ async def main() -> None:
         )
 
         if os.getenv("DRY_RUN", "").lower() in {"1", "true", "yes"}:
-             logger.info(
+            logger.info(
                 "DRY RUN successful: report was created but NOT published"
-         )
+            )
             return
 
         message_id = await publisher.publish(text)
