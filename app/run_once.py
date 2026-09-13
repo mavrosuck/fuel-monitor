@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -190,6 +191,12 @@ async def main() -> None:
             now,
             settings.timezone,
         )
+
+        if os.getenv("DRY_RUN", "").lower() in {"1", "true", "yes"}:
+             logger.info(
+                "DRY RUN successful: report was created but NOT published"
+         )
+            return
 
         message_id = await publisher.publish(text)
 
