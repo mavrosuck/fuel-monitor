@@ -5,7 +5,6 @@ import re
 from datetime import UTC, datetime, timedelta
 
 from app.ai.parser import FuelAIParser
-from app.ai.schema import BatchInput
 from app.collector.telegram_client import create_telegram_client
 from app.config import get_settings
 from app.publisher.telegram_publisher import TelegramPublisher
@@ -21,7 +20,10 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.casefold()).strip()
 
 
-async def collect_last_hour(client, source_chats: list[str]) -> list[TextMessage]:
+async def collect_last_hour(
+    client,
+    source_chats: list[str],
+) -> list[TextMessage]:
     end = datetime.now(UTC)
     start = end - timedelta(hours=1)
 
@@ -52,23 +54,31 @@ async def collect_last_hour(client, source_chats: list[str]) -> list[TextMessage
     # Убираем одинаковые репосты между чатами.
     newest_by_text: dict[str, tuple[datetime, str]] = {}
 
-    for message_date, text in sorted(collected, key=lambda item: item[0]):
-        newest_by_text[normalize_text(text)] = (message_date, text)
+    for message_date, text in sorted(
+        collected,
+        key=lambda item: item[0],
+    ):
+        newest_by_text[normalize_text(text)] = (
+            message_date,
+            text,
+        )
 
     unique_messages = sorted(
         newest_by_text.values(),
         key=lambda item: item[0],
     )
 
-    # Внутренние ID нужны только для одного запроса Gemini.
-    # Они уникальны даже если Telegram message_id совпал в двух разных чатах.
+    # Внутренние ID нужны только для одного запуска.
     return [
         TextMessage(
             source_message_id=index,
             message_date=message_date,
             text=text,
         )
-        for index, (message_date, text) in enumerate(unique_messages, start=1)
+        for index, (message_date, text) in enumerate(
+            unique_messages,
+            start=1,
+        )
     ]
 
 
@@ -89,13 +99,16 @@ async def main() -> None:
     normalizer = StationNormalizer()
 
     client = create_telegram_client(settings)
+
     publisher = TelegramPublisher(
         settings.bot_token.get_secret_value(),
         settings.target_channel,
     )
 
     try:
-        await client.start(phone=settings.telegram_phone)
+        await client.start(
+            phone=settings.telegram_phone,
+        )
 
         logger.info("Connected to Telegram")
 
@@ -115,19 +128,23 @@ async def main() -> None:
 
         classification = await classifier.classify(messages)
 
-        fact_results = [
-            classification.results_by_message_id[message.source_message_id]
-            for message in messages
-            if message.source_message_id
-            in classification.results_by_message_id
-            and classification.results_by_message_id[
+        fact_results = []
+
+        for message in messages:
+            parsed = classification.results_by_message_id.get(
                 message.source_message_id
-            ].classification
-            == "FACT"
-            and classification.results_by_message_id[
-                message.source_message_id
-            ].has_new_fuel_information
-        ]
+            )
+
+            if parsed is None:
+                continue
+
+            if parsed.classification != "FACT":
+                continue
+
+            if not parsed.has_new_fuel_information:
+                continue
+
+            fact_results.append(parsed)
 
         logger.info(
             "Gemini found %d unique FACT messages",
@@ -150,7 +167,9 @@ async def main() -> None:
         }
 
         for parsed in fact_results:
-            reported_at = message_dates.get(parsed.source_message_id)
+            reported_at = message_dates.get(
+                parsed.source_message_id
+            )
 
             for item in parsed.reports:
                 reports.append(
@@ -175,13 +194,17 @@ async def main() -> None:
                 )
 
         if not reports:
-            logger.info("No concrete fuel reports after parsing; exiting")
+            logger.info(
+                "No concrete fuel reports after parsing; exiting"
+            )
             return
 
         aggregated = aggregate_reports(reports)
 
         if not aggregated:
-            logger.info("Nothing to publish after aggregation")
+            logger.info(
+                "Nothing to publish after aggregation"
+            )
             return
 
         now = datetime.now(UTC)
@@ -192,7 +215,11 @@ async def main() -> None:
             settings.timezone,
         )
 
-        if os.getenv("DRY_RUN", "").lower() in {"1", "true", "yes"}:
+        if os.getenv("DRY_RUN", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
             logger.info(
                 "DRY RUN successful: report was created but NOT published"
             )
