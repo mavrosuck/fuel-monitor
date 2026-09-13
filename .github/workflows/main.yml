@@ -1,0 +1,43 @@
+name: Fuel Monitor Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore Telethon session
+        env:
+          TELETHON_SESSION_B64: ${{ secrets.TELETHON_SESSION_B64 }}
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+
+          data = os.environ["TELETHON_SESSION_B64"]
+          with open("fuel_monitor.session", "wb") as f:
+              f.write(base64.b64decode(data))
+          PY
+
+      - name: Run Fuel Monitor safely
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_PHONE: ${{ secrets.TELEGRAM_PHONE }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DRY_RUN: "1"
+        run: python -m app.run_once
