@@ -2,14 +2,6 @@ name: Fuel monitor
 
 on:
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Build the summary without publishing it
-        required: false
-        default: true
-        type: boolean
-  schedule:
-    - cron: "0 * * * *"
 
 permissions:
   contents: read
@@ -27,7 +19,7 @@ jobs:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       TELETHON_SESSION_NAME: ${{ github.workspace }}/fuel_monitor
-      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || '0' }}
+      DRY_RUN: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
