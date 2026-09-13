@@ -38,6 +38,14 @@ jobs:
       - name: Restore Telethon session
         env:
           TELETHON_SESSION_B64: ${{ secrets.TELETHON_SESSION_B64 }}
-        run: printf '%s' "$TELETHON_SESSION_B64" | base64 --decode > fuel_monitor.session
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+
+          encoded = os.environ["TELETHON_SESSION_B64"]
+          with open("fuel_monitor.session", "wb") as session_file:
+              session_file.write(base64.b64decode(encoded, validate=False))
+          PY
       - name: Run fuel monitor
         run: python -m app.runner
