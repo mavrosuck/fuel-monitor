@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     source_chats: list[str] = Field(default_factory=lambda: ["GdeBenzin56", "benzin156ru"])
     bot_token: SecretStr
     target_channel: str = "@benzinoren"
-    openai_api_key: SecretStr
-    openai_model: str
+    gemini_api_key: SecretStr
+    gemini_model: str = "gemini-2.5-flash"
     database_url: str
     timezone: str = "Asia/Yekaterinburg"  # IANA zone for Orenburg (UTC+5)
     min_reports_to_publish: int = Field(default=5, ge=1)
