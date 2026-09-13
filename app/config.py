@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     target_channel: str = "@benzinoren"
     gemini_api_key: SecretStr
     gemini_model: str = "gemini-2.5-flash"
-    database_url: str
+    database_url: str = ""
     timezone: str = "Asia/Yekaterinburg"  # IANA zone for Orenburg (UTC+5)
     min_reports_to_publish: int = Field(default=5, ge=1)
     schedule_minute: int = Field(default=0, ge=0, le=59)
