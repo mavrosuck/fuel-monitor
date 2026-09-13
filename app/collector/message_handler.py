@@ -34,7 +34,7 @@ class MessageHandler:
             except IntegrityError:
                 await session.rollback()
                 return
-            # OpenAI is intentionally not called by the real-time collector.
+            # AI is intentionally not called by the legacy real-time collector.
 
     async def store_backfill(self, chat_id: int, username: str | None, message_id: int, text: str, message_date) -> bool:
         """Сохраняет сообщение, полученное при стартовой проверке, без AI-разбора.
@@ -65,7 +65,7 @@ class MessageHandler:
             return True
 
     async def process_pending_batch(self) -> BatchProcessOutcome:
-        """Processes all accumulated text with at most one OpenAI request."""
+        """Processes all accumulated text with at most one AI request."""
         async with self.sessions() as session:
             pending = (
                 await session.scalars(

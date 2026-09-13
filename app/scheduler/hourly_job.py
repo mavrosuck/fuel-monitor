@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 async def run_hourly_job(sessions: async_sessionmaker, publisher: TelegramPublisher, handler: MessageHandler, minimum: int, timezone: str) -> None:
     outcome = await handler.process_pending_batch()
     if outcome.processed_count == 0:
-        logger.info("No new messages in hourly batch; OpenAI and publication skipped")
+        logger.info("No new messages in hourly batch; AI and publication skipped")
         return
     async with sessions() as session:
         service = ReportService(session, minimum, timezone)

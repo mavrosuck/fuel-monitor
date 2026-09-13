@@ -9,20 +9,16 @@ class Settings(BaseSettings):
 
     telegram_api_id: int
     telegram_api_hash: SecretStr
-    telegram_phone: str
     telethon_session_name: str = "fuel_monitor"
     source_chats: list[str] = Field(default_factory=lambda: ["GdeBenzin56", "benzin156ru"])
-    bot_token: SecretStr
+    bot_token: SecretStr | None = None
     target_channel: str = "@benzinoren"
-    openai_api_key: SecretStr
-    openai_model: str
-    database_url: str
-    timezone: str = "Asia/Yekaterinburg"  # IANA zone for Orenburg (UTC+5)
+    gemini_api_key: SecretStr
+    gemini_model: str = "gemini-2.5-flash-lite"
+    timezone: str = "Asia/Yekaterinburg"
     min_reports_to_publish: int = Field(default=5, ge=1)
-    schedule_minute: int = Field(default=0, ge=0, le=59)
-    schedule_second: int = Field(default=5, ge=0, le=59)
     log_level: str = "INFO"
-    health_port: int = Field(default=8080, ge=1, le=65535)
+    dry_run: bool = False
 
     @field_validator("source_chats", mode="before")
     @classmethod
