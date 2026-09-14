@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: fuel-monitor-hourly
+  group: fuel-monitor-production
   cancel-in-progress: false
 
 jobs:
@@ -19,6 +19,9 @@ jobs:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       TELETHON_SESSION_NAME: ${{ github.workspace }}/fuel_monitor
+      MAX_ENABLED: "true"
+      MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
+      PUBLISHED_STATE_PATH: ${{ github.workspace }}/.runtime-state/published-source-messages.json
       DRY_RUN: "1"
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +41,36 @@ jobs:
           encoded = os.environ["TELETHON_SESSION_B64"]
           with open("fuel_monitor.session", "wb") as session_file:
               session_file.write(base64.b64decode(encoded, validate=False))
+          PY
+      - name: Restore MAX session
+        env:
+          MAX_SESSION_GZ_B64: ${{ secrets.MAX_SESSION_GZ_B64 }}
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          import os
+          from pathlib import Path
+
+          encoded = os.environ["MAX_SESSION_GZ_B64"]
+          session = gzip.decompress(base64.b64decode(encoded, validate=True))
+          if not session:
+              raise RuntimeError("MAX session restore produced an empty file")
+          session_path = Path(".local/max/max_web_session.db")
+          session_path.parent.mkdir(parents=True, exist_ok=True)
+          session_path.write_bytes(session)
+          if not session_path.is_file() or session_path.stat().st_size == 0:
+              raise RuntimeError("MAX session restore failed")
+          PY
+      - name: Restore runtime publish state
+        run: |
+          mkdir -p .runtime-state
+          git fetch --no-tags origin runtime-state
+          git show origin/runtime-state:published-source-messages.json > .runtime-state/published-source-messages.json
+          python - <<'PY'
+          from app.services.published_state import PublishedMessageStore
+
+          PublishedMessageStore(".runtime-state/published-source-messages.json").load()
           PY
       - name: Run fuel monitor
         run: python -m app.runner
