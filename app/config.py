@@ -14,9 +14,16 @@ class Settings(BaseSettings):
     bot_token: SecretStr | None = None
     target_channel: str = "@benzinoren"
     gemini_api_key: SecretStr
-    gemini_model: str = "gemini-2.5-flash-lite"
+    gemini_model: str = "gemini-3.5-flash-lite"
     timezone: str = "Asia/Yekaterinburg"
     min_reports_to_publish: int = Field(default=5, ge=1)
+    published_state_path: str = ".runtime-state/published-source-messages.json"
+    published_state_retention_days: int = Field(default=14, ge=1)
+    max_enabled: bool = False
+    max_session_path: str = ".local/max/max_web_session.db"
+    max_source_chat_ids: list[int] = Field(
+        default_factory=lambda: [-76867728756169, -76729715050629, -76783627133571]
+    )
     log_level: str = "INFO"
     dry_run: bool = False
 
@@ -25,6 +32,13 @@ class Settings(BaseSettings):
     def split_source_chats(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [item.strip().lstrip("@") for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("max_source_chat_ids", mode="before")
+    @classmethod
+    def split_max_chat_ids(cls, value: str | list[int]) -> list[int]:
+        if isinstance(value, str):
+            return [int(item.strip()) for item in value.split(",") if item.strip()]
         return value
 
 

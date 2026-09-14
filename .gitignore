@@ -3,6 +3,10 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.local/
+.runtime-state/
 sessions/
 *.session
 *.session.b64
+*.db
+*.token

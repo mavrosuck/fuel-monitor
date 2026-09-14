@@ -1,5 +1,4 @@
 from aiogram import Bot
-from aiogram.enums import ParseMode
 
 
 class TelegramPublisher:
@@ -7,7 +6,7 @@ class TelegramPublisher:
         self.bot, self.channel = Bot(token), channel
 
     async def publish(self, text: str) -> int:
-        message = await self.bot.send_message(self.channel, text, parse_mode=ParseMode.MARKDOWN)
+        message = await self.bot.send_message(self.channel, text)
         return message.message_id
 
     async def close(self) -> None:

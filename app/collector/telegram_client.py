@@ -5,6 +5,7 @@ from typing import Any
 
 from telethon import TelegramClient
 
+from app.collector.models import CollectedMessage
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -18,16 +19,6 @@ class ChatDiagnostic:
     username: str | None
     messages: list[tuple[int, Any, str]]
     error: str | None = None
-
-
-@dataclass(frozen=True)
-class CollectedMessage:
-    source_message_id: int
-    chat_id: int
-    username: str | None
-    message_id: int
-    date: datetime
-    text: str
 
 
 def create_telegram_client(settings: Settings) -> TelegramClient:
@@ -54,9 +45,9 @@ class TelegramCollector:
         self.settings = settings
         self.client = create_telegram_client(settings)
 
-    async def collect_since(self, start: datetime) -> list[CollectedMessage]:
-        if start.tzinfo is None:
-            raise ValueError("start must be timezone-aware")
+    async def collect_since(self, start: datetime, end: datetime) -> list[CollectedMessage]:
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("collection window must be timezone-aware")
         messages: list[CollectedMessage] = []
         await self.client.connect()
         try:
@@ -68,8 +59,10 @@ class TelegramCollector:
                 username = getattr(entity, "username", None)
                 async for message in self.client.iter_messages(entity):
                     message_date = message.date.astimezone(UTC)
-                    if message_date <= start:
+                    if message_date < start:
                         break
+                    if message_date > end:
+                        continue
                     if message.media:
                         continue
                     text = (message.raw_text or "").strip()
@@ -77,12 +70,12 @@ class TelegramCollector:
                         continue
                     messages.append(
                         CollectedMessage(
-                            source_message_id=chat_id * 1_000_000_000 + message.id,
-                            chat_id=chat_id,
-                            username=username,
-                            message_id=message.id,
-                            date=message_date,
+                            platform="telegram",
+                            source_chat_id=chat_id,
+                            source_message_id=message.id,
+                            message_date=message_date,
                             text=text,
+                            source_name=source,
                         )
                     )
         finally:

@@ -14,7 +14,7 @@ PostgreSQL, FastAPI, APScheduler и OpenAI в рабочем запуске не
 
 В GitHub repository secrets добавьте только `GEMINI_API_KEY`. Workflow также использует уже существующие `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `BOT_TOKEN` и `TELETHON_SESSION_B64`. Секреты и файлы `*.session` не коммитятся.
 
-Используется `gemini-2.5-flash-lite`: модель поддерживает Pydantic structured output и доступна на Gemini Free Tier с ограничениями. Проверьте актуальные [лимиты и условия Gemini](https://ai.google.dev/gemini-api/docs/pricing) перед включением регулярного запуска.
+Используется `gemini-3.5-flash-lite`: модель поддерживает Pydantic structured output и доступна на Gemini Free Tier с ограничениями. Проверьте актуальные [лимиты и условия Gemini](https://ai.google.dev/gemini-api/docs/pricing) перед включением регулярного запуска.
 
 ## Локальная проверка
 
