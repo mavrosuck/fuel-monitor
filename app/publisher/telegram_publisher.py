@@ -1,13 +1,23 @@
+import logging
+
 from aiogram import Bot
 
 from app.publisher.cta import with_cta
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramPublisher:
     def __init__(self, token: str, channel: str) -> None:
         self.bot, self.channel = Bot(token), channel
 
+    async def log_identity(self) -> None:
+        bot = await self.bot.get_me()
+        logger.info("Telegram publisher bot: @%s", bot.username or "(no username)")
+        logger.info("Telegram target channel: %s", self.channel)
+
     async def publish(self, text: str) -> int:
+        await self.log_identity()
         message_text, entities = with_cta(text)
         message = await self.bot.send_message(self.channel, message_text, entities=entities)
         return message.message_id

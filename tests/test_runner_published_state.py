@@ -19,7 +19,7 @@ def _configure(monkeypatch, tmp_path, *, dry_run: bool, minimum: int, publisher)
         source_chats=["GdeBenzin56"],
         gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),
         gemini_model="unused",
-        bot_token=SimpleNamespace(get_secret_value=lambda: "unused"),
+        bot_token=None if dry_run else SimpleNamespace(get_secret_value=lambda: "unused"),
         target_channel="@benzinoren",
         timezone="Asia/Yekaterinburg",
         published_state_path=str(state_path),

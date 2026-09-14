@@ -115,11 +115,19 @@ async def run_once(now: datetime | None = None) -> str | None:
         return None
     summary = format_summary(aggregated, end, settings.timezone)
     if settings.dry_run:
+        bot_token = getattr(settings, "bot_token", None)
+        if bot_token is not None:
+            publisher = TelegramPublisher(bot_token.get_secret_value(), settings.target_channel)
+            try:
+                await publisher.log_identity()
+            finally:
+                await publisher.close()
         logger.info("DRY_RUN is enabled; Telegram publication skipped")
         logger.info("Publication: dry-run (would publish %d fuel facts)", len(aggregated))
         print(summary)
         return summary
-    if settings.bot_token is None:
+    bot_token = getattr(settings, "bot_token", None)
+    if bot_token is None:
         raise RuntimeError("BOT_TOKEN is required unless DRY_RUN=1")
     used_source_keys = set().union(*(report.source_keys for report in aggregated))
     source_dates = {
@@ -127,7 +135,7 @@ async def run_once(now: datetime | None = None) -> str | None:
         for message in factual_messages
         if source_key(message) in used_source_keys
     }
-    publisher = TelegramPublisher(settings.bot_token.get_secret_value(), settings.target_channel)
+    publisher = TelegramPublisher(bot_token.get_secret_value(), settings.target_channel)
     try:
         await publisher.publish(summary)
         published_store.record_published(published_state, source_dates, datetime.now(UTC))
