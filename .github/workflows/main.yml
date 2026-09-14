@@ -2,7 +2,7 @@ name: Fuel monitor
 
 on:
   schedule:
-    - cron: '7 * * * *'
+    - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
       publish:

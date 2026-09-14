@@ -7,7 +7,7 @@ def test_workflow_supports_safe_manual_and_scheduled_production_runs() -> None:
     assert "workflow_dispatch:" in workflow
     assert "default: false" in workflow
     assert "type: boolean" in workflow
-    assert "- cron: '7 * * * *'" in workflow
+    assert "- cron: '23 * * * *'" in workflow
     assert "DRY_RUN: ${{ (github.event_name == 'schedule' || inputs.publish) && '0' || '1' }}" in workflow
     assert "group: fuel-monitor-production" in workflow
     assert "cancel-in-progress: false" in workflow
