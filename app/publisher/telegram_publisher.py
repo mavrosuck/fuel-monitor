@@ -3,6 +3,7 @@ import logging
 from aiogram import Bot
 
 from app.publisher.cta import with_cta
+from app.services.formatter import FormattedSummary
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class TelegramPublisher:
         logger.info("Telegram publisher bot: @%s", bot.username or "(no username)")
         logger.info("Telegram target channel: %s", self.channel)
 
-    async def publish(self, text: str) -> int:
+    async def publish(self, text: str | FormattedSummary) -> int:
         await self.log_identity()
         message_text, entities = with_cta(text)
         message = await self.bot.send_message(self.channel, message_text, entities=entities)

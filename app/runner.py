@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.publisher.telegram_publisher import TelegramPublisher
 from app.services.aggregator import AggregatedReport, aggregate_reports
 from app.services.batch_classifier import BatchClassifier, TextMessage
-from app.services.formatter import format_summary
+from app.services.formatter import format_styled_summary
 from app.services.published_state import PublishedMessageStore
 from app.services.station_normalizer import StationNormalizer
 
@@ -113,7 +113,7 @@ async def run_once(now: datetime | None = None) -> str | None:
     if len(aggregated) < settings.min_reports_to_publish:
         logger.info("Publication: skipped (<%d fuel facts)", settings.min_reports_to_publish)
         return None
-    summary = format_summary(aggregated, end, settings.timezone)
+    summary = format_styled_summary(aggregated, end, settings.timezone)
     if settings.dry_run:
         bot_token = getattr(settings, "bot_token", None)
         if bot_token is not None:
@@ -124,8 +124,8 @@ async def run_once(now: datetime | None = None) -> str | None:
                 await publisher.close()
         logger.info("DRY_RUN is enabled; Telegram publication skipped")
         logger.info("Publication: dry-run (would publish %d fuel facts)", len(aggregated))
-        print(summary)
-        return summary
+        print(summary.text)
+        return summary.text
     bot_token = getattr(settings, "bot_token", None)
     if bot_token is None:
         raise RuntimeError("BOT_TOKEN is required unless DRY_RUN=1")
@@ -142,7 +142,7 @@ async def run_once(now: datetime | None = None) -> str | None:
     finally:
         await publisher.close()
     logger.info("Published a report from %d unique FACT messages", len(factual_messages))
-    return summary
+    return summary.text
 
 
 def main() -> None:

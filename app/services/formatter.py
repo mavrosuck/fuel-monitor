@@ -1,4 +1,6 @@
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from app.services.aggregator import AggregatedReport
@@ -7,6 +9,35 @@ MONTHS = (
     "января", "февраля", "марта", "апреля", "мая", "июня",
     "июля", "августа", "сентября", "октября", "ноября", "декабря",
 )
+
+
+@dataclass(frozen=True)
+class TextStyle:
+    type: Literal["bold", "italic"]
+    offset: int
+    length: int
+
+
+@dataclass(frozen=True)
+class FormattedSummary:
+    text: str
+    styles: tuple[TextStyle, ...]
+
+
+class _SummaryBuilder:
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.styles: list[TextStyle] = []
+        self.length = 0
+
+    def append(self, value: str, style: Literal["bold", "italic"] | None = None) -> None:
+        if style is not None and value:
+            self.styles.append(TextStyle(style, self.length, len(value)))
+        self.parts.append(value)
+        self.length += len(value)
+
+    def build(self) -> FormattedSummary:
+        return FormattedSummary("".join(self.parts), tuple(self.styles))
 
 
 def day_type(moment: datetime) -> str:
@@ -52,24 +83,37 @@ def _station_name(report: AggregatedReport) -> str:
     return " · ".join(parts) or "АЗС"
 
 
-def format_summary(reports: list[AggregatedReport], now: datetime, timezone: str) -> str:
+def format_styled_summary(reports: list[AggregatedReport], now: datetime, timezone: str) -> FormattedSummary:
     if now.tzinfo is None:
         raise ValueError("summary timestamp must be timezone-aware")
     local = now.astimezone(ZoneInfo(timezone))
-    title = f"ГДЕ БЕНЗИН, ОРЕНБУРГ? — {local:%H:%M}, {local.day} {MONTHS[local.month - 1]}"
+    builder = _SummaryBuilder()
+    builder.append("ГДЕ БЕНЗИН, ОРЕНБУРГ?", "bold")
+    builder.append(" — ")
+    builder.append(f"{local:%H:%M}, {local.day} {MONTHS[local.month - 1]}", "italic")
     sections = [
         ("AVAILABLE", "🟢 Топливо есть"),
         ("LIMITED", "🟡 Есть ограничения"),
         ("UNAVAILABLE", "🔴 Топлива нет"),
     ]
-    blocks = [title]
     for state, heading in sections:
         items = [report for report in reports if report.station_state == state]
         if not items:
             continue
-        lines = []
-        for item in sorted(items, key=lambda value: ((value.brand or ""), (value.location or ""))):
-            line = f"• {_station_name(item)} — {_detail(item)} · {_source_time(item, timezone)}"
-            lines.append(line)
-        blocks.append(heading + "\n\n" + "\n".join(lines))
-    return "\n\n".join(blocks)
+        builder.append("\n\n")
+        builder.append(heading, "bold")
+        builder.append("\n\n")
+        for index, item in enumerate(sorted(items, key=lambda value: ((value.brand or ""), (value.location or "")))):
+            if index:
+                builder.append("\n")
+            builder.append("• ")
+            builder.append(_station_name(item), "bold")
+            builder.append(" — ")
+            builder.append(_detail(item))
+            builder.append(" · ")
+            builder.append(_source_time(item, timezone), "italic")
+    return builder.build()
+
+
+def format_summary(reports: list[AggregatedReport], now: datetime, timezone: str) -> str:
+    return format_styled_summary(reports, now, timezone).text
