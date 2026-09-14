@@ -8,6 +8,7 @@ from app import runner
 from app.ai.schema import FuelReportData, MessageParseResult
 from app.collector.models import CollectedMessage
 from app.services.batch_classifier import BatchClassification
+from app.services.health_state import HealthStateStore
 
 
 def _configure(monkeypatch, tmp_path, *, dry_run: bool, minimum: int, publisher):
@@ -24,6 +25,7 @@ def _configure(monkeypatch, tmp_path, *, dry_run: bool, minimum: int, publisher)
         timezone="Asia/Yekaterinburg",
         published_state_path=str(state_path),
         published_state_retention_days=14,
+        health_state_path=str(tmp_path / "health.json"),
     )
     message = CollectedMessage("telegram", 1, 1, datetime(2026, 9, 14, 12, tzinfo=UTC), "На Победе 95 есть")
 
@@ -93,3 +95,5 @@ def test_failed_publish_never_writes_published_state(monkeypatch, tmp_path) -> N
     with pytest.raises(RuntimeError, match="publish failed"):
         asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC)))
     assert not state_path.exists()
+    health = HealthStateStore(tmp_path / "health.json", "Asia/Yekaterinburg").load(datetime(2026, 9, 14, 13, tzinfo=UTC))
+    assert health.daily.failed_runs == 1

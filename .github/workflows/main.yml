@@ -28,6 +28,7 @@ jobs:
       MAX_ENABLED: "true"
       MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
       PUBLISHED_STATE_PATH: ${{ github.workspace }}/.runtime-state/published-source-messages.json
+      HEALTH_STATE_PATH: ${{ github.workspace }}/.runtime-state/health.json
       DRY_RUN: ${{ inputs.publish && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
@@ -68,25 +69,29 @@ jobs:
           if not session_path.is_file() or session_path.stat().st_size == 0:
               raise RuntimeError("MAX session restore failed")
           PY
-      - name: Restore runtime publish state
+      - name: Restore runtime state
         run: |
           mkdir -p .runtime-state
           git fetch --no-tags origin runtime-state
           state_head="$(git rev-parse origin/runtime-state)"
           echo "RUNTIME_STATE_HEAD=$state_head" >> "$GITHUB_ENV"
           git show "$state_head:published-source-messages.json" > .runtime-state/published-source-messages.json
+          git show "$state_head:health.json" > .runtime-state/health.json
           python - <<'PY'
+          from datetime import UTC, datetime
+          from app.services.health_state import HealthStateStore
           from app.services.published_state import PublishedMessageStore
 
           PublishedMessageStore(".runtime-state/published-source-messages.json").load()
+          HealthStateStore(".runtime-state/health.json", "Asia/Yekaterinburg").load(datetime.now(UTC))
           PY
       - name: Run fuel monitor
         run: python -m app.runner
-      - name: Update runtime publish state
-        if: ${{ inputs.publish }}
+      - name: Update runtime state
+        if: ${{ inputs.publish && (success() || failure()) }}
         run: |
-          if cmp -s .runtime-state/published-source-messages.json <(git show "$RUNTIME_STATE_HEAD:published-source-messages.json"); then
-            echo "Runtime state unchanged; no state commit created."
+          if [ ! -f .runtime-state/published-source-messages.json ] || [ ! -f .runtime-state/health.json ]; then
+            echo "Runtime state files are unavailable; no state commit created."
             exit 0
           fi
 
@@ -100,7 +105,12 @@ jobs:
           trap 'git worktree remove --force "$state_worktree" || true' EXIT
           git worktree add --detach "$state_worktree" "$RUNTIME_STATE_HEAD"
           cp .runtime-state/published-source-messages.json "$state_worktree/published-source-messages.json"
-          git -C "$state_worktree" add published-source-messages.json
+          cp .runtime-state/health.json "$state_worktree/health.json"
+          git -C "$state_worktree" add published-source-messages.json health.json
+          if git -C "$state_worktree" diff --cached --quiet; then
+            echo "Runtime state unchanged; no state commit created."
+            exit 0
+          fi
           git -C "$state_worktree" diff --cached --check
-          git -C "$state_worktree" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update published source state"
+          git -C "$state_worktree" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update runtime state"
           git -C "$state_worktree" push origin HEAD:runtime-state

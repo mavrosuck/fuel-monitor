@@ -226,6 +226,7 @@ def test_successful_publish_marks_only_one_multi_report_source_and_skips_it_late
         timezone="Asia/Yekaterinburg",
         published_state_path=str(state_path),
         published_state_retention_days=14,
+        health_state_path=str(tmp_path / "health.json"),
     )
     source = CollectedMessage("telegram", 1, 10, datetime(2026, 9, 14, 12, tzinfo=UTC), "Мини-сводка")
 
@@ -273,3 +274,6 @@ def test_successful_publish_marks_only_one_multi_report_source_and_skips_it_late
 
     assert FakePublisher.calls == 1
     assert set(json.loads(state_path.read_text(encoding="utf-8"))["published_messages"]) == {"telegram|1|10"}
+    health = HealthStateStore(settings.health_state_path, settings.timezone).load(datetime(2026, 9, 14, 13, 5, tzinfo=UTC))
+    assert health.daily.successful_runs == 2
+    assert health.daily.publications == 1
