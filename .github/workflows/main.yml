@@ -2,9 +2,15 @@ name: Fuel monitor
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Allow real Telegram publication
+        required: true
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: fuel-monitor-production
@@ -22,7 +28,7 @@ jobs:
       MAX_ENABLED: "true"
       MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
       PUBLISHED_STATE_PATH: ${{ github.workspace }}/.runtime-state/published-source-messages.json
-      DRY_RUN: "1"
+      DRY_RUN: ${{ inputs.publish && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -66,7 +72,9 @@ jobs:
         run: |
           mkdir -p .runtime-state
           git fetch --no-tags origin runtime-state
-          git show origin/runtime-state:published-source-messages.json > .runtime-state/published-source-messages.json
+          state_head="$(git rev-parse origin/runtime-state)"
+          echo "RUNTIME_STATE_HEAD=$state_head" >> "$GITHUB_ENV"
+          git show "$state_head:published-source-messages.json" > .runtime-state/published-source-messages.json
           python - <<'PY'
           from app.services.published_state import PublishedMessageStore
 
@@ -74,3 +82,25 @@ jobs:
           PY
       - name: Run fuel monitor
         run: python -m app.runner
+      - name: Update runtime publish state
+        if: ${{ inputs.publish }}
+        run: |
+          if cmp -s .runtime-state/published-source-messages.json <(git show "$RUNTIME_STATE_HEAD:published-source-messages.json"); then
+            echo "Runtime state unchanged; no state commit created."
+            exit 0
+          fi
+
+          git fetch --no-tags origin runtime-state
+          if [ "$(git rev-parse origin/runtime-state)" != "$RUNTIME_STATE_HEAD" ]; then
+            echo "Runtime state changed remotely; refusing to overwrite it."
+            exit 1
+          fi
+
+          state_worktree="$(mktemp -d)/runtime-state"
+          trap 'git worktree remove --force "$state_worktree" || true' EXIT
+          git worktree add --detach "$state_worktree" "$RUNTIME_STATE_HEAD"
+          cp .runtime-state/published-source-messages.json "$state_worktree/published-source-messages.json"
+          git -C "$state_worktree" add published-source-messages.json
+          git -C "$state_worktree" diff --cached --check
+          git -C "$state_worktree" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Update published source state"
+          git -C "$state_worktree" push origin HEAD:runtime-state
