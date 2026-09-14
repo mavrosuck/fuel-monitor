@@ -1,6 +1,8 @@
 name: Fuel monitor
 
 on:
+  schedule:
+    - cron: '7 * * * *'
   workflow_dispatch:
     inputs:
       publish:
@@ -28,7 +30,7 @@ jobs:
       MAX_ENABLED: "true"
       MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
       PUBLISHED_STATE_PATH: ${{ github.workspace }}/.runtime-state/published-source-messages.json
-      DRY_RUN: ${{ inputs.publish && '0' || '1' }}
+      DRY_RUN: ${{ (github.event_name == 'schedule' || inputs.publish) && '0' || '1' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -83,7 +85,7 @@ jobs:
       - name: Run fuel monitor
         run: python -m app.runner
       - name: Update runtime publish state
-        if: ${{ inputs.publish }}
+        if: ${{ github.event_name == 'schedule' || inputs.publish }}
         run: |
           if cmp -s .runtime-state/published-source-messages.json <(git show "$RUNTIME_STATE_HEAD:published-source-messages.json"); then
             echo "Runtime state unchanged; no state commit created."
