@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr
     gemini_model: str = "gemini-3.5-flash-lite"
     timezone: str = "Asia/Yekaterinburg"
-    min_reports_to_publish: int = Field(default=5, ge=1)
+    min_reports_to_publish: int = Field(default=2, ge=1)
     published_state_path: str = ".runtime-state/published-source-messages.json"
     published_state_retention_days: int = Field(default=14, ge=1)
     max_enabled: bool = False

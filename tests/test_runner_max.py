@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -43,16 +44,16 @@ def test_max_error_blocks_publication(monkeypatch) -> None:
         asyncio.run(runner.run_once(datetime(2026, 9, 14, tzinfo=UTC)))
 
 
-def test_fewer_than_five_aggregated_fuel_facts_never_reaches_publisher(monkeypatch) -> None:
+def test_one_aggregated_fuel_fact_never_reaches_publisher(monkeypatch, caplog) -> None:
     settings = SimpleNamespace(
         max_enabled=False,
-        min_reports_to_publish=5,
+        min_reports_to_publish=2,
         dry_run=False,
         source_chats=["GdeBenzin56", "benzin156ru"],
         gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),
         gemini_model="unused",
     )
-    messages = [CollectedMessage("telegram", 1, index, datetime(2026, 9, 14, 12, index, tzinfo=UTC), f"АИ-95 {index}") for index in range(4)]
+    messages = [CollectedMessage("telegram", 1, 1, datetime(2026, 9, 14, 12, tzinfo=UTC), "АИ-95 есть")]
 
     class FakeTelegramCollector:
         def __init__(self, _settings) -> None:
@@ -73,7 +74,7 @@ def test_fewer_than_five_aggregated_fuel_facts_never_reaches_publisher(monkeypat
                         source_message_id=item.source_message_id,
                         classification="FACT",
                         has_new_fuel_information=True,
-                        reports=[FuelReportData(station_state="AVAILABLE", fuel_available=["АИ-95"])],
+                        reports=[FuelReportData(location="Единственная", station_state="AVAILABLE", fuel_available=["АИ-95"])],
                     )
                     for item in text_messages
                 },
@@ -89,14 +90,16 @@ def test_fewer_than_five_aggregated_fuel_facts_never_reaches_publisher(monkeypat
     monkeypatch.setattr(runner, "BatchClassifier", FakeClassifier)
     monkeypatch.setattr(runner, "TelegramPublisher", UnexpectedPublisher)
 
-    assert asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC))) is None
+    with caplog.at_level(logging.INFO):
+        assert asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC))) is None
+    assert "Publication: skipped (<2 fuel facts)" in caplog.text
 
 
-@pytest.mark.parametrize("report_count", [5, 8])
-def test_many_reports_from_one_fact_source_message_pass_fuel_fact_threshold(monkeypatch, report_count: int) -> None:
+@pytest.mark.parametrize("report_count", [2, 8])
+def test_multiple_reports_from_one_fact_source_message_pass_fuel_fact_threshold(monkeypatch, report_count: int) -> None:
     settings = SimpleNamespace(
         max_enabled=False,
-        min_reports_to_publish=5,
+        min_reports_to_publish=2,
         dry_run=True,
         source_chats=["GdeBenzin56", "benzin156ru"],
         gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),
@@ -146,14 +149,14 @@ def test_many_reports_from_one_fact_source_message_pass_fuel_fact_threshold(monk
 @pytest.mark.parametrize(
     ("reports_by_source", "should_publish"),
     [
-        ([["A", "B"], ["C", "D"], ["E"], ["F"]], True),
-        ([["A"], ["B"], ["C"], ["D"], ["A"], ["B"], ["C"], ["D"], ["A"], ["B"]], False),
+        ([["A"], ["B"]], True),
+        ([["A"]] * 10, False),
     ],
 )
 def test_fuel_fact_threshold_uses_unique_aggregated_stations(monkeypatch, reports_by_source, should_publish: bool) -> None:
     settings = SimpleNamespace(
         max_enabled=False,
-        min_reports_to_publish=5,
+        min_reports_to_publish=2,
         dry_run=True,
         source_chats=["GdeBenzin56", "benzin156ru"],
         gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),
@@ -207,7 +210,7 @@ def test_successful_publish_marks_only_one_multi_report_source_and_skips_it_late
     state_path = tmp_path / "published-source-messages.json"
     settings = SimpleNamespace(
         max_enabled=False,
-        min_reports_to_publish=1,
+        min_reports_to_publish=2,
         dry_run=False,
         source_chats=["GdeBenzin56", "benzin156ru"],
         gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),

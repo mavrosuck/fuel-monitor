@@ -71,7 +71,7 @@ def test_below_threshold_never_writes_published_state(monkeypatch, tmp_path) -> 
         def __init__(self, *_args):
             raise AssertionError("publisher must not be constructed")
 
-    state_path = _configure(monkeypatch, tmp_path, dry_run=False, minimum=5, publisher=UnexpectedPublisher)
+    state_path = _configure(monkeypatch, tmp_path, dry_run=False, minimum=2, publisher=UnexpectedPublisher)
 
     assert asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC))) is None
     assert not state_path.exists()
