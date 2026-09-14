@@ -43,7 +43,7 @@ def test_max_error_blocks_publication(monkeypatch) -> None:
         asyncio.run(runner.run_once(datetime(2026, 9, 14, tzinfo=UTC)))
 
 
-def test_fewer_than_five_facts_never_reaches_publisher(monkeypatch) -> None:
+def test_fewer_than_five_aggregated_fuel_facts_never_reaches_publisher(monkeypatch) -> None:
     settings = SimpleNamespace(
         max_enabled=False,
         min_reports_to_publish=5,
@@ -92,14 +92,16 @@ def test_fewer_than_five_facts_never_reaches_publisher(monkeypatch) -> None:
     assert asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC))) is None
 
 
-def test_many_reports_from_one_fact_source_message_do_not_pass_threshold(monkeypatch) -> None:
+@pytest.mark.parametrize("report_count", [5, 8])
+def test_many_reports_from_one_fact_source_message_pass_fuel_fact_threshold(monkeypatch, report_count: int) -> None:
     settings = SimpleNamespace(
         max_enabled=False,
         min_reports_to_publish=5,
-        dry_run=False,
+        dry_run=True,
         source_chats=["GdeBenzin56", "benzin156ru"],
         gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),
         gemini_model="unused",
+        timezone="Asia/Yekaterinburg",
     )
     source = CollectedMessage("telegram", 1, 1, datetime(2026, 9, 14, 12, tzinfo=UTC), "Мини-сводка")
 
@@ -117,7 +119,7 @@ def test_many_reports_from_one_fact_source_message_do_not_pass_threshold(monkeyp
         async def classify(self, text_messages):
             reports = [
                 FuelReportData(location=f"АЗС {index}", fuel_available=["АИ-92"], station_state="AVAILABLE")
-                for index in range(8)
+                for index in range(report_count)
             ]
             return BatchClassification(
                 set(),
@@ -131,17 +133,74 @@ def test_many_reports_from_one_fact_source_message_do_not_pass_threshold(monkeyp
                 },
             )
 
-    class UnexpectedPublisher:
-        def __init__(self, *_args) -> None:
-            raise AssertionError("publisher must not be constructed")
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner, "TelegramCollector", FakeTelegramCollector)
+    monkeypatch.setattr(runner, "FuelAIParser", lambda *_args: object())
+    monkeypatch.setattr(runner, "BatchClassifier", FakeClassifier)
+    summary = asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC)))
+
+    assert summary is not None
+    assert summary.count("• ") == report_count
+
+
+@pytest.mark.parametrize(
+    ("reports_by_source", "should_publish"),
+    [
+        ([["A", "B"], ["C", "D"], ["E"], ["F"]], True),
+        ([["A"], ["B"], ["C"], ["D"], ["A"], ["B"], ["C"], ["D"], ["A"], ["B"]], False),
+    ],
+)
+def test_fuel_fact_threshold_uses_unique_aggregated_stations(monkeypatch, reports_by_source, should_publish: bool) -> None:
+    settings = SimpleNamespace(
+        max_enabled=False,
+        min_reports_to_publish=5,
+        dry_run=True,
+        source_chats=["GdeBenzin56", "benzin156ru"],
+        gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),
+        gemini_model="unused",
+        timezone="Asia/Yekaterinburg",
+    )
+    messages = [
+        CollectedMessage("telegram", 1, index, datetime(2026, 9, 14, 12, index, tzinfo=UTC), f"source {index}")
+        for index in range(1, len(reports_by_source) + 1)
+    ]
+
+    class FakeTelegramCollector:
+        def __init__(self, _settings) -> None:
+            pass
+
+        async def collect_since(self, _start, _end):
+            return messages
+
+    class FakeClassifier:
+        def __init__(self, _parser) -> None:
+            pass
+
+        async def classify(self, text_messages):
+            return BatchClassification(
+                set(),
+                {
+                    message.source_message_id: MessageParseResult(
+                        source_message_id=message.source_message_id,
+                        classification="FACT",
+                        has_new_fuel_information=True,
+                        reports=[
+                            FuelReportData(location=location, fuel_available=["АИ-92"], station_state="AVAILABLE")
+                            for location in reports_by_source[message.source_message_id - 1]
+                        ],
+                    )
+                    for message in text_messages
+                },
+            )
 
     monkeypatch.setattr(runner, "get_settings", lambda: settings)
     monkeypatch.setattr(runner, "TelegramCollector", FakeTelegramCollector)
     monkeypatch.setattr(runner, "FuelAIParser", lambda *_args: object())
     monkeypatch.setattr(runner, "BatchClassifier", FakeClassifier)
-    monkeypatch.setattr(runner, "TelegramPublisher", UnexpectedPublisher)
 
-    assert asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC))) is None
+    summary = asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC)))
+
+    assert (summary is not None) is should_publish
 
 
 def test_successful_publish_marks_only_one_multi_report_source_and_skips_it_later(monkeypatch, tmp_path) -> None:

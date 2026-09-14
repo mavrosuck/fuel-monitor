@@ -106,16 +106,17 @@ async def run_once(now: datetime | None = None) -> str | None:
         if (parsed := classified.results_by_message_id.get(index)) and parsed.has_new_fuel_information
     ]
     logger.info("Gemini FACT messages: %d", len(factual_messages))
-    if len(factual_messages) < settings.min_reports_to_publish:
-        logger.info("Publication: skipped (<%d FACT)", settings.min_reports_to_publish)
-        return None
     reports = reports_from_results(messages, classified.results_by_message_id, StationNormalizer())
     aggregated = aggregate_reports(reports)
     logger.info("Aggregated stations: %d", len(aggregated))
+    logger.info("Publishable fuel facts: %d", len(aggregated))
+    if len(aggregated) < settings.min_reports_to_publish:
+        logger.info("Publication: skipped (<%d fuel facts)", settings.min_reports_to_publish)
+        return None
     summary = format_summary(aggregated, end, settings.timezone)
     if settings.dry_run:
         logger.info("DRY_RUN is enabled; Telegram publication skipped")
-        logger.info("Publication: DRY_RUN")
+        logger.info("Publication: dry-run (would publish %d fuel facts)", len(aggregated))
         print(summary)
         return summary
     if settings.bot_token is None:
