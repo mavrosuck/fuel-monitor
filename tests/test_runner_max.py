@@ -11,6 +11,7 @@ from app.collector.models import CollectedMessage
 from app.collector.max_collector import MaxCollectionError
 from app import runner
 from app.services.batch_classifier import BatchClassification
+from app.services.health_state import HealthStateStore
 
 
 def test_max_error_blocks_publication(monkeypatch) -> None:
@@ -44,7 +45,7 @@ def test_max_error_blocks_publication(monkeypatch) -> None:
         asyncio.run(runner.run_once(datetime(2026, 9, 14, tzinfo=UTC)))
 
 
-def test_one_aggregated_fuel_fact_never_reaches_publisher(monkeypatch, caplog) -> None:
+def test_one_aggregated_fuel_fact_is_a_successful_skipped_run(monkeypatch, caplog, tmp_path) -> None:
     settings = SimpleNamespace(
         max_enabled=False,
         min_reports_to_publish=2,
@@ -52,6 +53,8 @@ def test_one_aggregated_fuel_fact_never_reaches_publisher(monkeypatch, caplog) -
         source_chats=["GdeBenzin56", "benzin156ru"],
         gemini_api_key=SimpleNamespace(get_secret_value=lambda: "unused"),
         gemini_model="unused",
+        timezone="Asia/Yekaterinburg",
+        health_state_path=str(tmp_path / "health.json"),
     )
     messages = [CollectedMessage("telegram", 1, 1, datetime(2026, 9, 14, 12, tzinfo=UTC), "АИ-95 есть")]
 
@@ -93,6 +96,9 @@ def test_one_aggregated_fuel_fact_never_reaches_publisher(monkeypatch, caplog) -
     with caplog.at_level(logging.INFO):
         assert asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC))) is None
     assert "Publication: skipped (<2 fuel facts)" in caplog.text
+    health = HealthStateStore(settings.health_state_path, settings.timezone).load(datetime(2026, 9, 14, 13, tzinfo=UTC))
+    assert health.daily.successful_runs == 1
+    assert health.daily.failed_runs == 0
 
 
 @pytest.mark.parametrize("report_count", [2, 8])

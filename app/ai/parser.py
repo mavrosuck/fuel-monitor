@@ -1,14 +1,11 @@
-import asyncio
 import json
-import logging
 
 from google import genai
 from google.genai import types
 
 from app.ai.prompt import SYSTEM_PROMPT
 from app.ai.schema import BatchInput, BatchParseResult, ParseResult
-
-logger = logging.getLogger(__name__)
+from app.services.retry import is_transient_gemini_error, retry_async
 
 
 class FuelAIParser:
@@ -18,40 +15,31 @@ class FuelAIParser:
 
     async def parse(self, text: str) -> ParseResult:
         """Classifies one message for local diagnostics."""
-        for attempt in range(3):
-            try:
-                response = await self.client.aio.models.generate_content(
-                    model=self.model,
-                    contents=text,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_PROMPT,
-                        response_mime_type="application/json",
-                        response_schema=ParseResult,
-                    ),
-                )
-                return _parse_response(response, ParseResult)
-            except Exception:
-                if attempt == 2:
-                    raise
-                delay = 2**attempt
-                logger.warning("Gemini parsing failed; retrying in %s seconds", delay, exc_info=True)
-                await asyncio.sleep(delay)
-        raise RuntimeError("unreachable")
+        return await self._generate(text, ParseResult)
 
     async def parse_batch(self, messages: list[BatchInput]) -> BatchParseResult:
         """Makes exactly one Gemini request for a non-empty hourly batch."""
         if not messages:
             return BatchParseResult(results=[])
-        response = await self.client.aio.models.generate_content(
-            model=self.model,
-            contents=json.dumps([item.model_dump(mode="json") for item in messages], ensure_ascii=False),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=BatchParseResult,
-            ),
+        return await self._generate(
+            json.dumps([item.model_dump(mode="json") for item in messages], ensure_ascii=False),
+            BatchParseResult,
         )
-        return _parse_response(response, BatchParseResult)
+
+    async def _generate(self, contents: str, schema: type[ParseResult] | type[BatchParseResult]):
+        async def request():
+            return await self.client.aio.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                ),
+            )
+
+        response = await retry_async(request, is_retryable=is_transient_gemini_error, operation_name="Gemini request")
+        return _parse_response(response, schema)
 
 
 def _parse_response(response, schema: type[ParseResult] | type[BatchParseResult]):

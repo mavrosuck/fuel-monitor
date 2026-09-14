@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     min_reports_to_publish: int = Field(default=2, ge=1)
     published_state_path: str = ".runtime-state/published-source-messages.json"
     published_state_retention_days: int = Field(default=14, ge=1)
+    health_state_path: str = ".runtime-state/health.json"
+    admin_telegram_chat_id: int | None = None
     max_enabled: bool = False
     max_session_path: str = ".local/max/max_web_session.db"
     max_source_chat_ids: list[int] = Field(

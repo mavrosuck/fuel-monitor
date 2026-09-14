@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from app.ai.parser import FuelAIParser
@@ -12,13 +13,25 @@ from app.collector.models import CollectedMessage
 from app.collector.telegram_client import TelegramCollector
 from app.config import get_settings
 from app.publisher.telegram_publisher import TelegramPublisher
+from app.services.admin_notifier import AdminNotifier
 from app.services.aggregator import AggregatedReport, aggregate_reports
 from app.services.batch_classifier import BatchClassifier, TextMessage
 from app.services.formatter import format_styled_summary
+from app.services.health_state import HealthState, HealthStateStore
+from app.services.publication_guard import publication_allowed, publishable_fuel_facts
 from app.services.published_state import PublishedMessageStore
 from app.services.station_normalizer import StationNormalizer
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RunMetrics:
+    telegram_collected: int = 0
+    max_collected: int = 0
+    publishable_facts: int = 0
+    publication: bool = False
+    failure_title: str = "Fuel monitor run failed"
 
 
 def deduplicate_messages(messages: list[CollectedMessage]) -> list[CollectedMessage]:
@@ -68,13 +81,65 @@ async def run_once(now: datetime | None = None) -> str | None:
     settings = get_settings()
     end = now or datetime.now(UTC)
     start = end - timedelta(hours=1)
+    notifier = _admin_notifier(settings)
+    health_store, health_state = _health_state(settings, end)
+    metrics = RunMetrics()
+    try:
+        result = await _run_monitor(settings, start, end, metrics)
+    except Exception as exc:
+        if health_store is not None and health_state is not None:
+            try:
+                health_store.record_failure(health_state, end)
+            except Exception as health_error:
+                logger.error("Health failure state was not saved: %s", type(health_error).__name__)
+        await notifier.notify_error(metrics.failure_title, end, exc)
+        raise
+    else:
+        if health_store is not None and health_state is not None:
+            health_store.record_success(
+                health_state,
+                end,
+                publishable_facts=metrics.publishable_facts,
+                telegram_collected=metrics.telegram_collected,
+                max_collected=metrics.max_collected,
+                publication=metrics.publication,
+            )
+        return result
+    finally:
+        await notifier.close()
+
+
+def _admin_notifier(settings) -> AdminNotifier:
+    bot_token = getattr(settings, "bot_token", None)
+    notifier = AdminNotifier(
+        bot_token.get_secret_value() if bot_token is not None else None,
+        getattr(settings, "admin_telegram_chat_id", None),
+        getattr(settings, "timezone", "Asia/Yekaterinburg"),
+    )
+    if not notifier.enabled:
+        logger.info("Admin notifications: disabled")
+    return notifier
+
+
+def _health_state(settings, now: datetime) -> tuple[HealthStateStore | None, HealthState | None]:
+    path = getattr(settings, "health_state_path", None)
+    if path is None:
+        return None, None
+    store = HealthStateStore(path, getattr(settings, "timezone", "Asia/Yekaterinburg"))
+    return store, store.load(now)
+
+
+async def _run_monitor(settings, start: datetime, end: datetime, metrics: RunMetrics) -> str | None:
     logger.info("Window: %s -> %s", start.isoformat(), end.isoformat())
+    metrics.failure_title = "Telegram collection failed"
     telegram_messages = await TelegramCollector(settings).collect_since(start, end)
+    metrics.telegram_collected = len(telegram_messages)
     logger.info("Telegram:")
     for source in settings.source_chats:
         logger.info("  %s: %d", source, sum(message.source_name == source for message in telegram_messages))
     messages = list(telegram_messages)
     if settings.max_enabled:
+        metrics.failure_title = "MAX collection failed"
         try:
             max_collection = await MaxCollector(settings).collect_since(start, end)
         except MaxCollectionError as exc:
@@ -84,6 +149,7 @@ async def run_once(now: datetime | None = None) -> str | None:
         for chat_id in settings.max_source_chat_ids:
             logger.info("  %s: %d", max_collection.chat_titles[chat_id], max_collection.message_counts[chat_id])
         messages.extend(max_collection.messages)
+        metrics.max_collected = len(max_collection.messages)
     logger.info("Total before dedupe: %d", len(messages))
     messages = deduplicate_messages(messages)
     logger.info("After dedupe: %d", len(messages))
@@ -95,6 +161,7 @@ async def run_once(now: datetime | None = None) -> str | None:
     unpublished_messages = [message for message in messages if source_key(message) not in published_state.published_messages]
     logger.info("Already published source messages skipped: %d", len(messages) - len(unpublished_messages))
     messages = unpublished_messages
+    metrics.failure_title = "Gemini request failed after retries"
     classifier = BatchClassifier(FuelAIParser(settings.gemini_api_key.get_secret_value(), settings.gemini_model))
     classified = await classifier.classify(
         [TextMessage(index, item.message_date, item.text) for index, item in enumerate(messages, start=1)]
@@ -108,10 +175,10 @@ async def run_once(now: datetime | None = None) -> str | None:
     logger.info("Gemini FACT messages: %d", len(factual_messages))
     reports = reports_from_results(messages, classified.results_by_message_id, StationNormalizer())
     aggregated = aggregate_reports(reports)
-    publishable_fuel_facts = len(aggregated)
+    metrics.publishable_facts = publishable_fuel_facts(aggregated)
     logger.info("Aggregated stations: %d", len(aggregated))
-    logger.info("Publishable fuel facts: %d", publishable_fuel_facts)
-    if publishable_fuel_facts < settings.min_reports_to_publish:
+    logger.info("Publishable fuel facts: %d", metrics.publishable_facts)
+    if not publication_allowed(aggregated, settings.min_reports_to_publish):
         logger.info("Publication: skipped (<%d fuel facts)", settings.min_reports_to_publish)
         return None
     summary = format_styled_summary(aggregated, end, settings.timezone)
@@ -124,7 +191,7 @@ async def run_once(now: datetime | None = None) -> str | None:
             finally:
                 await publisher.close()
         logger.info("DRY_RUN is enabled; Telegram publication skipped")
-        logger.info("Publication: dry-run (would publish %d fuel facts)", publishable_fuel_facts)
+        logger.info("Publication: dry-run (would publish %d fuel facts)", metrics.publishable_facts)
         print(summary.text)
         return summary.text
     bot_token = getattr(settings, "bot_token", None)
@@ -138,8 +205,10 @@ async def run_once(now: datetime | None = None) -> str | None:
     }
     publisher = TelegramPublisher(bot_token.get_secret_value(), settings.target_channel)
     try:
+        metrics.failure_title = "Telegram publication failed"
         await publisher.publish(summary)
         published_store.record_published(published_state, source_dates, datetime.now(UTC))
+        metrics.publication = True
     finally:
         await publisher.close()
     logger.info("Published a report from %d unique FACT messages", len(factual_messages))
