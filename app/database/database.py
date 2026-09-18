@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from typing import Any, Mapping
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -7,8 +8,8 @@ from app.database.models import Base
 
 
 class Database:
-    def __init__(self, url: str) -> None:
-        self.engine: AsyncEngine = create_async_engine(url, pool_pre_ping=True)
+    def __init__(self, url: str, *, connect_args: Mapping[str, Any] | None = None) -> None:
+        self.engine: AsyncEngine = create_async_engine(url, pool_pre_ping=True, connect_args=dict(connect_args or {}))
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
 
     async def create_tables(self) -> None:

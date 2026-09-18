@@ -12,6 +12,7 @@ from app.collector.max_collector import MaxCollectionError, MaxCollector
 from app.collector.models import CollectedMessage
 from app.collector.telegram_client import TelegramCollector
 from app.config import get_settings
+from app.facts.persistence import NeonFactsPersistence, create_neon_facts_persistence
 from app.publisher.telegram_publisher import TelegramPublisher
 from app.services.admin_notifier import AdminNotifier
 from app.services.aggregator import AggregatedReport, aggregate_reports
@@ -130,6 +131,21 @@ def _health_state(settings, now: datetime) -> tuple[HealthStateStore | None, Hea
 
 
 async def _run_monitor(settings, start: datetime, end: datetime, metrics: RunMetrics) -> str | None:
+    persistence = create_neon_facts_persistence(getattr(settings, "neon_collector_database_url", None))
+    try:
+        return await _run_monitor_with_optional_persistence(settings, start, end, metrics, persistence)
+    finally:
+        if persistence is not None:
+            await persistence.close()
+
+
+async def _run_monitor_with_optional_persistence(
+    settings,
+    start: datetime,
+    end: datetime,
+    metrics: RunMetrics,
+    persistence: NeonFactsPersistence | None,
+) -> str | None:
     logger.info("Window: %s -> %s", start.isoformat(), end.isoformat())
     metrics.failure_title = "Telegram collection failed"
     telegram_messages = await TelegramCollector(settings).collect_since(start, end)
@@ -173,7 +189,10 @@ async def _run_monitor(settings, start: datetime, end: datetime, metrics: RunMet
         if (parsed := classified.results_by_message_id.get(index)) and parsed.has_new_fuel_information
     ]
     logger.info("Gemini FACT messages: %d", len(factual_messages))
-    reports = reports_from_results(messages, classified.results_by_message_id, StationNormalizer())
+    normalizer = StationNormalizer()
+    if persistence is not None:
+        await _persist_classified_results(messages, classified.results_by_message_id, normalizer, persistence)
+    reports = reports_from_results(messages, classified.results_by_message_id, normalizer)
     aggregated = aggregate_reports(reports)
     metrics.publishable_facts = publishable_fuel_facts(aggregated)
     logger.info("Aggregated stations: %d", len(aggregated))
@@ -213,6 +232,23 @@ async def _run_monitor(settings, start: datetime, end: datetime, metrics: RunMet
         await publisher.close()
     logger.info("Published a report from %d unique FACT messages", len(factual_messages))
     return summary.text
+
+
+async def _persist_classified_results(
+    messages: list[CollectedMessage],
+    results: dict[int, MessageParseResult],
+    normalizer: StationNormalizer,
+    persistence: NeonFactsPersistence,
+) -> None:
+    for index, message in enumerate(messages, start=1):
+        result = results.get(index)
+        if result is None:
+            continue
+        try:
+            await persistence.persist(message, result, normalizer)
+        except Exception as exc:
+            logger.warning("Neon facts persistence disabled for this run: %s", type(exc).__name__)
+            return
 
 
 def main() -> None:

@@ -1,5 +1,6 @@
 aiogram>=3.13,<4
 aiosqlite>=0.20,<1
+asyncpg>=0.29,<1
 certifi>=2023.7.22
 google-genai>=1.0,<2
 greenlet>=3.1,<4

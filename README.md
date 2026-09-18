@@ -12,7 +12,7 @@ PostgreSQL, FastAPI, APScheduler и OpenAI в рабочем запуске не
 
 ## Будущее shared facts storage
 
-Подготовленный, но пока не подключённый persistence layer будет использовать `NEON_COLLECTOR_DATABASE_URL` для collector и `NEON_BOT_FACTS_DATABASE_URL` для read-only MAX-бота. Рабочий запуск сейчас не читает и не требует эти переменные.
+Опциональный persistence layer использует `NEON_COLLECTOR_DATABASE_URL` для collector. URL должен использовать `postgresql+asyncpg://` и не содержать `sslmode` или `channel_binding`: TLS включается отдельным проверяющим `SSLContext`. При отсутствии переменной рабочий запуск не создаёт Neon engine. Будущий read-only MAX-бот будет использовать отдельный `NEON_BOT_FACTS_DATABASE_URL`.
 
 ## Настройка
 

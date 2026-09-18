@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     max_source_chat_ids: list[int] = Field(
         default_factory=lambda: [-76867728756169, -76729715050629, -76783627133571]
     )
+    neon_collector_database_url: SecretStr | None = None
     log_level: str = "INFO"
     dry_run: bool = False
 
