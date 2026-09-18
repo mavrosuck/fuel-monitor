@@ -10,6 +10,10 @@ Bot API ← formatter + aggregator ← FACT only (minimum: 5)
 
 PostgreSQL, FastAPI, APScheduler и OpenAI в рабочем запуске не используются.
 
+## Будущее shared facts storage
+
+Подготовленный, но пока не подключённый persistence layer будет использовать `NEON_COLLECTOR_DATABASE_URL` для collector и `NEON_BOT_FACTS_DATABASE_URL` для read-only MAX-бота. Рабочий запуск сейчас не читает и не требует эти переменные.
+
 ## Настройка
 
 В GitHub repository secrets добавьте только `GEMINI_API_KEY`. Workflow также использует уже существующие `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `BOT_TOKEN` и `TELETHON_SESSION_B64`. Секреты и файлы `*.session` не коммитятся.

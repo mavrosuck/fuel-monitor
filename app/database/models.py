@@ -1,9 +1,16 @@
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import JSON, Uuid
+
+
+SOURCE_STATUSES = ("pending", "processing", "done", "duplicate", "failed")
+FUEL_TYPES = ("ai_92", "ai_95", "ai_100", "diesel", "gas")
+FUEL_STATES = ("available", "limited", "unavailable")
 
 
 class Base(DeclarativeBase):
@@ -24,6 +31,50 @@ class SourceMessage(Base):
     is_ai_processed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     has_new_fuel_information: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProcessedSourceMessage(Base):
+    __tablename__ = "processed_source_messages"
+    __table_args__ = (
+        CheckConstraint(f"processing_status IN ({', '.join(repr(status) for status in SOURCE_STATUSES)})", name="ck_processed_source_messages_status"),
+    )
+    source_key: Mapped[str] = mapped_column(String(600), primary_key=True)
+    source_platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_chat_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_message_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    message_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    processing_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    canonical_source_key: Mapped[str | None] = mapped_column(ForeignKey("processed_source_messages.source_key"))
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class FuelFact(Base):
+    __tablename__ = "fuel_facts"
+    __table_args__ = (
+        UniqueConstraint("source_key", "station_normalized", "fuel_type", name="uq_fuel_facts_source_station_fuel"),
+        CheckConstraint(f"fuel_type IN ({', '.join(repr(fuel_type) for fuel_type in FUEL_TYPES)})", name="ck_fuel_facts_fuel_type"),
+        CheckConstraint(f"state IN ({', '.join(repr(state) for state in FUEL_STATES)})", name="ck_fuel_facts_state"),
+        Index("ix_fuel_facts_station_fuel_observed_at", "station_normalized", "fuel_type", "observed_at"),
+        Index("ix_fuel_facts_fuel_observed_at", "fuel_type", "observed_at"),
+    )
+    id: Mapped[object] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    source_key: Mapped[str] = mapped_column(ForeignKey("processed_source_messages.source_key", ondelete="CASCADE"), nullable=False)
+    station_normalized: Mapped[str] = mapped_column(String(255), nullable=False)
+    station_brand: Mapped[str | None] = mapped_column(String(255))
+    station_location: Mapped[str | None] = mapped_column(String(255))
+    fuel_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    price_text: Mapped[str | None] = mapped_column(Text)
+    queue_text: Mapped[str | None] = mapped_column(Text)
+    queue_cars: Mapped[int | None] = mapped_column(Integer)
+    restrictions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    additional_info: Mapped[str | None] = mapped_column(Text)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_time_text: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class FuelReport(Base):
