@@ -24,6 +24,7 @@ jobs:
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NEON_COLLECTOR_DATABASE_URL: ${{ secrets.NEON_COLLECTOR_DATABASE_URL }}
       TELETHON_SESSION_NAME: ${{ github.workspace }}/fuel_monitor
       MAX_ENABLED: "true"
       MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
