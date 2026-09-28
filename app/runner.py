@@ -81,7 +81,7 @@ def reports_from_results(
 async def run_once(now: datetime | None = None) -> str | None:
     settings = get_settings()
     end = now or datetime.now(UTC)
-    start = end - timedelta(hours=1)
+    start = end - timedelta(minutes=30)
     notifier = _admin_notifier(settings)
     health_store, health_state = _health_state(settings, end)
     metrics = RunMetrics()

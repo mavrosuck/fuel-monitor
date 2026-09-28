@@ -1,6 +1,6 @@
 # Fuel Monitor — Оренбург
 
-Одноразовая задача: за каждый запуск читает текстовые сообщения последнего часа из `GdeBenzin56` и `benzin156ru`, устраняет дубликаты, локально фильтрует шум и одним запросом Gemini классифицирует остаток. Сводка публикуется в Telegram только при пяти или более уникальных FACT-сообщениях.
+За каждый запуск collector читает сообщения последних 30 минут из Telegram и read-only MAX/PyMax источников, устраняет дубликаты, локально фильтрует шум и одним запросом Gemini классифицирует остаток. Структурированные FACT сохраняются в Neon с исходным timestamp сообщения. Telegram-сводка публикуется только при пяти или более уникальных FACT-сообщениях.
 
 ```text
 GitHub Actions → Telethon → keyword filter + deduplication → Gemini Structured Output
@@ -12,7 +12,7 @@ PostgreSQL, FastAPI, APScheduler и OpenAI в рабочем запуске не
 
 ## Будущее shared facts storage
 
-Опциональный persistence layer использует `NEON_COLLECTOR_DATABASE_URL` для collector. URL должен использовать `postgresql+asyncpg://` и не содержать `sslmode` или `channel_binding`: TLS включается отдельным проверяющим `SSLContext`. При отсутствии переменной рабочий запуск не создаёт Neon engine. Будущий read-only MAX-бот будет использовать отдельный `NEON_BOT_FACTS_DATABASE_URL`.
+Опциональный persistence layer использует `NEON_COLLECTOR_DATABASE_URL` для collector. URL должен использовать `postgresql+asyncpg://` и не содержать `sslmode` или `channel_binding`: TLS включается отдельным проверяющим `SSLContext`. При отсутствии переменной рабочий запуск не создаёт Neon engine. Read-only MAX-бот использует отдельный `NEON_BOT_FACTS_DATABASE_URL` и показывает только FACT с исходным timestamp не старше 30 минут.
 
 ## Настройка
 
@@ -33,7 +33,7 @@ DRY_RUN=1 python -m app.runner
 
 ## GitHub Actions
 
-[`main.yml`](.github/workflows/main.yml) допускает ручной запуск через `workflow_dispatch`; он по умолчанию безопасный (`DRY_RUN=1`). Также в нём настроен запуск каждый час (`0 * * * *`, UTC). Scheduled run использует `DRY_RUN=0` и поэтому публикует отчёт после успешной ручной проверки.
+[`main.yml`](.github/workflows/main.yml) запускает collector каждые 10 минут (`7,17,27,37,47,57`, UTC): scheduled run всегда использует `DRY_RUN=1`, поэтому сохраняет свежие FACT в Neon, но не публикует в Telegram и не меняет runtime state. Ручной `workflow_dispatch` по умолчанию также безопасен; только ручной запуск с `publish=true` разрешает Telegram-публикацию и обновление runtime state.
 
 Сессия Telethon декодируется из `TELETHON_SESSION_B64` только во временном runner'е GitHub Actions. SMS-авторизация не требуется.
 

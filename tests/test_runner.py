@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.ai.schema import FuelReportData, MessageParseResult
 from app.collector.models import CollectedMessage
+from app import runner
 from app.runner import deduplicate_messages, reports_from_results
 from app.services.station_normalizer import StationNormalizer
 
@@ -52,3 +53,31 @@ def test_all_reports_from_one_source_message_keep_its_timestamp() -> None:
 
     assert len(reports) == 3
     assert {report.reported_at for report in reports} == {source.message_date}
+
+
+def test_collector_window_is_strictly_thirty_minutes(monkeypatch) -> None:
+    observed = {}
+
+    class Notifier:
+        async def notify_error(self, *_args) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
+    async def fake_run(_settings, start, end, _metrics):
+        observed["start"] = start
+        observed["end"] = end
+        return None
+
+    monkeypatch.setattr(runner, "_run_monitor", fake_run)
+    monkeypatch.setattr(runner, "_admin_notifier", lambda _settings: Notifier())
+    monkeypatch.setattr(runner, "_health_state", lambda _settings, _now: (None, None))
+    monkeypatch.setattr(runner, "get_settings", lambda: object())
+
+    end = datetime(2026, 9, 28, 12, tzinfo=UTC)
+    import asyncio
+    asyncio.run(runner.run_once(end))
+
+    assert observed["end"] == end
+    assert observed["start"] == end - timedelta(minutes=30)
