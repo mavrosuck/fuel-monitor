@@ -33,7 +33,7 @@ DRY_RUN=1 python -m app.runner
 
 ## GitHub Actions
 
-[`main.yml`](.github/workflows/main.yml) запускает collector каждые 10 минут (`7,17,27,37,47,57`, UTC): scheduled run всегда использует `DRY_RUN=1`, поэтому сохраняет свежие FACT в Neon, но не публикует в Telegram и не меняет runtime state. Ручной `workflow_dispatch` по умолчанию также безопасен; только ручной запуск с `publish=true` разрешает Telegram-публикацию и обновление runtime state.
+[`main.yml`](.github/workflows/main.yml) запускает collector каждые 10 минут (`7,17,27,37,47,57`, UTC): эти scheduled run используют `DRY_RUN=1`, поэтому сохраняют свежие FACT в Neon, но не публикуют в Telegram. Отдельный scheduled run в `:23` каждого часа (UTC) использует `DRY_RUN=0` и публикует только при существующем пороге и с сохранением runtime state для дедупликации. Ручной `workflow_dispatch` по умолчанию также безопасен; только ручной запуск с `publish=true` разрешает Telegram-публикацию и обновление runtime state.
 
 Сессия Telethon декодируется из `TELETHON_SESSION_B64` только во временном runner'е GitHub Actions. SMS-авторизация не требуется.
 
