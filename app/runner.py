@@ -81,7 +81,12 @@ def reports_from_results(
 async def run_once(now: datetime | None = None) -> str | None:
     settings = get_settings()
     end = now or datetime.now(UTC)
-    start = end - timedelta(minutes=30)
+    window_minutes = (
+        getattr(settings, "collector_window_minutes", 30)
+        if getattr(settings, "dry_run", False)
+        else getattr(settings, "channel_summary_window_minutes", 60)
+    )
+    start = end - timedelta(minutes=window_minutes)
     notifier = _admin_notifier(settings)
     health_store, health_state = _health_state(settings, end)
     metrics = RunMetrics()
@@ -254,6 +259,8 @@ async def _persist_classified_results(
 def main() -> None:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("telethon").setLevel(logging.WARNING)
+    logging.getLogger("google_genai").setLevel(logging.WARNING)
     asyncio.run(run_once())
 
 

@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.5-flash-lite"
     timezone: str = "Asia/Yekaterinburg"
     min_reports_to_publish: int = Field(default=2, ge=1)
+    collector_window_minutes: int = Field(default=30, ge=1)
+    channel_summary_window_minutes: int = Field(default=60, ge=1)
     published_state_path: str = ".runtime-state/published-source-messages.json"
     published_state_retention_days: int = Field(default=14, ge=1)
     health_state_path: str = ".runtime-state/health.json"
