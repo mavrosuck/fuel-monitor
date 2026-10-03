@@ -1,17 +1,17 @@
 {
   "version": 1,
-  "last_successful_run_at": "2026-10-03T04:01:05.372913+00:00",
-  "last_run_at": "2026-10-03T04:01:05.372913+00:00",
+  "last_successful_run_at": "2026-10-03T05:01:13.609246+00:00",
+  "last_run_at": "2026-10-03T05:01:13.609246+00:00",
   "consecutive_failures": 0,
   "daily": {
     "date": "2026-10-03",
-    "runs": 12,
-    "successful_runs": 12,
+    "runs": 13,
+    "successful_runs": 13,
     "failed_runs": 0,
-    "publications": 7,
-    "publishable_facts": 56,
+    "publications": 8,
+    "publishable_facts": 74,
     "telegram_collected": 13,
-    "max_collected": 55
+    "max_collected": 71
   },
   "last_daily_report_date": null
 }
