@@ -1,13 +1,13 @@
 {
   "version": 1,
   "last_successful_run_at": "2026-10-18T21:36:49.013020+00:00",
-  "last_run_at": "2026-10-18T21:36:49.013020+00:00",
-  "consecutive_failures": 0,
+  "last_run_at": "2026-10-18T22:01:04.421478+00:00",
+  "consecutive_failures": 1,
   "daily": {
     "date": "2026-10-19",
-    "runs": 4,
+    "runs": 5,
     "successful_runs": 4,
-    "failed_runs": 0,
+    "failed_runs": 1,
     "publications": 2,
     "publishable_facts": 9,
     "telegram_collected": 14,
