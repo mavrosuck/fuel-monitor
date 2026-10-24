@@ -1,9 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.ai.schema import FuelReportData, MessageParseResult
 from app.collector.models import CollectedMessage
 from app import runner
-from app.runner import deduplicate_messages, reports_from_results, scheduled_publication_end
+from app.runner import LatePublicationError, deduplicate_messages, reports_from_results, scheduled_publication_end
 from app.services.station_normalizer import StationNormalizer
 
 
@@ -124,7 +126,7 @@ def test_channel_summary_window_is_one_hour(monkeypatch) -> None:
     assert observed["start"] == end - timedelta(hours=1)
 
 
-def test_delayed_publication_uses_the_last_completed_orenburg_slot(monkeypatch) -> None:
+def test_small_publication_delay_uses_the_scheduled_orenburg_slot(monkeypatch) -> None:
     observed = {}
 
     class Notifier:
@@ -158,10 +160,51 @@ def test_delayed_publication_uses_the_last_completed_orenburg_slot(monkeypatch) 
 
     import asyncio
 
-    asyncio.run(runner.run_once(datetime(2026, 9, 28, 10, 17, tzinfo=UTC)))
+    asyncio.run(runner.run_once(datetime(2026, 9, 28, 10, 14, tzinfo=UTC)))
 
     assert observed["end"] == datetime(2026, 9, 28, 10, tzinfo=UTC)
     assert observed["start"] == datetime(2026, 9, 28, 9, tzinfo=UTC)
+
+
+def test_late_publication_is_rejected_before_collection(monkeypatch) -> None:
+    notifications = []
+
+    class Notifier:
+        async def notify_error(self, title, now, error) -> None:
+            notifications.append((title, now, error))
+
+        async def close(self) -> None:
+            pass
+
+    async def unexpected_run(*_args):
+        raise AssertionError("late publication must stop before collection")
+
+    monkeypatch.setattr(runner, "_run_monitor", unexpected_run)
+    monkeypatch.setattr(runner, "_admin_notifier", lambda _settings: Notifier())
+    monkeypatch.setattr(runner, "_health_state", lambda _settings, _now: (None, None))
+    monkeypatch.setattr(
+        runner,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "dry_run": False,
+                "timezone": "Asia/Yekaterinburg",
+                "channel_summary_interval_hours": 3,
+                "max_publication_delay_minutes": 15,
+            },
+        )(),
+    )
+
+    import asyncio
+
+    now = datetime(2026, 9, 28, 10, 16, tzinfo=UTC)
+    with pytest.raises(LatePublicationError, match="16 minutes late"):
+        asyncio.run(runner.run_once(now))
+
+    assert notifications[0][0] == "Scheduled publication skipped because GitHub Actions started late"
+    assert notifications[0][1] == now
 
 
 def test_publication_slot_is_calculated_in_orenburg_time() -> None:

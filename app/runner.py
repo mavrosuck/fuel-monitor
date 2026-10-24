@@ -27,6 +27,10 @@ from app.services.station_normalizer import StationNormalizer
 logger = logging.getLogger(__name__)
 
 
+class LatePublicationError(RuntimeError):
+    pass
+
+
 @dataclass
 class RunMetrics:
     telegram_collected: int = 0
@@ -57,6 +61,18 @@ def scheduled_publication_end(now: datetime, timezone: str, interval_hours: int)
     local_now = now.astimezone(ZoneInfo(timezone))
     slot_hour = local_now.hour - local_now.hour % interval_hours
     return local_now.replace(hour=slot_hour, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
+def ensure_publication_is_timely(now: datetime, scheduled_end: datetime, max_delay_minutes: int) -> None:
+    if max_delay_minutes < 0:
+        raise ValueError("maximum publication delay cannot be negative")
+    delay = now.astimezone(UTC) - scheduled_end.astimezone(UTC)
+    if delay > timedelta(minutes=max_delay_minutes):
+        delay_minutes = int(delay.total_seconds() // 60)
+        raise LatePublicationError(
+            f"scheduled publication is {delay_minutes} minutes late; "
+            f"maximum allowed delay is {max_delay_minutes} minutes"
+        )
 
 
 def reports_from_results(
@@ -109,23 +125,30 @@ async def run_once(now: datetime | None = None) -> str | None:
     )
     start = end - timedelta(minutes=window_minutes)
     notifier = _admin_notifier(settings)
-    health_store, health_state = _health_state(settings, end)
+    health_store, health_state = _health_state(settings, current)
     metrics = RunMetrics()
     try:
+        if not dry_run:
+            metrics.failure_title = "Scheduled publication skipped because GitHub Actions started late"
+            ensure_publication_is_timely(
+                current,
+                end,
+                getattr(settings, "max_publication_delay_minutes", 15),
+            )
         result = await _run_monitor(settings, start, end, metrics)
     except Exception as exc:
         if health_store is not None and health_state is not None:
             try:
-                health_store.record_failure(health_state, end)
+                health_store.record_failure(health_state, current)
             except Exception as health_error:
                 logger.error("Health failure state was not saved: %s", type(health_error).__name__)
-        await notifier.notify_error(metrics.failure_title, end, exc)
+        await notifier.notify_error(metrics.failure_title, current, exc)
         raise
     else:
         if health_store is not None and health_state is not None:
             health_store.record_success(
                 health_state,
-                end,
+                current,
                 publishable_facts=metrics.publishable_facts,
                 telegram_collected=metrics.telegram_collected,
                 max_collected=metrics.max_collected,

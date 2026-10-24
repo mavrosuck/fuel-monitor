@@ -9,6 +9,7 @@ def test_workflow_restores_and_safely_updates_independent_runtime_state_files() 
     assert 'cron: "7,17,27,37,47,57 * * * *"' in workflow
     assert 'cron: "0 1,4,7,10,13,16,19,22 * * *"' in workflow
     assert "DRY_RUN: ${{ github.event_name == 'schedule' && github.event.schedule == '0 1,4,7,10,13,16,19,22 * * *' && '0' || '1' }}" in workflow
+    assert 'MAX_PUBLICATION_DELAY_MINUTES: "15"' in workflow
     assert "group: fuel-monitor-production" in workflow
     assert "cancel-in-progress: false" in workflow
     assert "contents: write" in workflow
