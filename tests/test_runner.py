@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from app.ai.schema import FuelReportData, MessageParseResult
 from app.collector.models import CollectedMessage
 from app import runner
-from app.runner import deduplicate_messages, reports_from_results
+from app.runner import deduplicate_messages, reports_from_results, scheduled_publication_end
 from app.services.station_normalizer import StationNormalizer
 
 
@@ -101,12 +101,72 @@ def test_channel_summary_window_is_one_hour(monkeypatch) -> None:
     monkeypatch.setattr(runner, "_run_monitor", fake_run)
     monkeypatch.setattr(runner, "_admin_notifier", lambda _settings: Notifier())
     monkeypatch.setattr(runner, "_health_state", lambda _settings, _now: (None, None))
-    monkeypatch.setattr(runner, "get_settings", lambda: type("Settings", (), {"dry_run": False})())
+    monkeypatch.setattr(
+        runner,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "dry_run": False,
+                "timezone": "Asia/Yekaterinburg",
+                "channel_summary_interval_hours": 3,
+            },
+        )(),
+    )
 
-    end = datetime(2026, 9, 28, 12, tzinfo=UTC)
+    end = datetime(2026, 9, 28, 10, tzinfo=UTC)
     import asyncio
 
     asyncio.run(runner.run_once(end))
 
     assert observed["end"] == end
     assert observed["start"] == end - timedelta(hours=1)
+
+
+def test_delayed_publication_uses_the_last_completed_orenburg_slot(monkeypatch) -> None:
+    observed = {}
+
+    class Notifier:
+        async def notify_error(self, *_args) -> None:
+            pass
+
+        async def close(self) -> None:
+            pass
+
+    async def fake_run(_settings, start, end, _metrics):
+        observed["start"] = start
+        observed["end"] = end
+        return None
+
+    monkeypatch.setattr(runner, "_run_monitor", fake_run)
+    monkeypatch.setattr(runner, "_admin_notifier", lambda _settings: Notifier())
+    monkeypatch.setattr(runner, "_health_state", lambda _settings, _now: (None, None))
+    monkeypatch.setattr(
+        runner,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "dry_run": False,
+                "timezone": "Asia/Yekaterinburg",
+                "channel_summary_interval_hours": 3,
+            },
+        )(),
+    )
+
+    import asyncio
+
+    asyncio.run(runner.run_once(datetime(2026, 9, 28, 10, 17, tzinfo=UTC)))
+
+    assert observed["end"] == datetime(2026, 9, 28, 10, tzinfo=UTC)
+    assert observed["start"] == datetime(2026, 9, 28, 9, tzinfo=UTC)
+
+
+def test_publication_slot_is_calculated_in_orenburg_time() -> None:
+    delayed = datetime(2026, 9, 28, 19, 12, tzinfo=UTC)
+
+    assert scheduled_publication_end(delayed, "Asia/Yekaterinburg", 3) == datetime(
+        2026, 9, 28, 19, tzinfo=UTC
+    )

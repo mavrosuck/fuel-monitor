@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.ai.parser import FuelAIParser
 from app.ai.schema import MessageParseResult
@@ -48,6 +49,16 @@ def source_key(message: CollectedMessage) -> str:
     return f"{message.platform}|{message.source_chat_id}|{message.source_message_id}"
 
 
+def scheduled_publication_end(now: datetime, timezone: str, interval_hours: int) -> datetime:
+    if now.tzinfo is None:
+        raise ValueError("publication timestamp must be timezone-aware")
+    if interval_hours < 1 or interval_hours > 24:
+        raise ValueError("publication interval must be between 1 and 24 hours")
+    local_now = now.astimezone(ZoneInfo(timezone))
+    slot_hour = local_now.hour - local_now.hour % interval_hours
+    return local_now.replace(hour=slot_hour, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
 def reports_from_results(
     messages: list[CollectedMessage], results: dict[int, MessageParseResult], normalizer: StationNormalizer
 ) -> list[AggregatedReport]:
@@ -80,10 +91,20 @@ def reports_from_results(
 
 async def run_once(now: datetime | None = None) -> str | None:
     settings = get_settings()
-    end = now or datetime.now(UTC)
+    current = now or datetime.now(UTC)
+    dry_run = getattr(settings, "dry_run", False)
+    end = (
+        current
+        if dry_run
+        else scheduled_publication_end(
+            current,
+            getattr(settings, "timezone", "Asia/Yekaterinburg"),
+            getattr(settings, "channel_summary_interval_hours", 3),
+        )
+    )
     window_minutes = (
         getattr(settings, "collector_window_minutes", 30)
-        if getattr(settings, "dry_run", False)
+        if dry_run
         else getattr(settings, "channel_summary_window_minutes", 60)
     )
     start = end - timedelta(minutes=window_minutes)
