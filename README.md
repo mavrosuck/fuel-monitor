@@ -12,7 +12,7 @@ PostgreSQL, FastAPI, APScheduler и OpenAI в рабочем запуске не
 
 ## Будущее shared facts storage
 
-Опциональный persistence layer использует `NEON_COLLECTOR_DATABASE_URL` для collector. URL должен использовать `postgresql+asyncpg://` и не содержать `sslmode` или `channel_binding`: TLS включается отдельным проверяющим `SSLContext`. При отсутствии переменной рабочий запуск не создаёт Neon engine. Read-only MAX-бот использует отдельный `NEON_BOT_FACTS_DATABASE_URL` и показывает только FACT с исходным timestamp не старше 30 минут.
+Опциональный persistence layer использует `NEON_COLLECTOR_DATABASE_URL` для collector. URL должен использовать `postgresql+asyncpg://` и не содержать `sslmode` или `channel_binding`: TLS включается отдельным проверяющим `SSLContext`. При отсутствии переменной рабочий запуск не создаёт Neon engine. Read-only MAX-бот использует отдельный `NEON_BOT_FACTS_DATABASE_URL` и показывает только FACT с исходным timestamp не старше трёх часов.
 
 ## Настройка
 
@@ -33,7 +33,7 @@ DRY_RUN=1 python -m app.runner
 
 ## GitHub Actions
 
-[`main.yml`](.github/workflows/main.yml) запускает collector каждые 10 минут (`7,17,27,37,47,57`, UTC): эти scheduled run используют `DRY_RUN=1`, читают последние 30 минут, сохраняют свежие FACT в Neon, но не публикуют в Telegram. Отдельный scheduled run в `:23` каждого часа (UTC) использует `DRY_RUN=0`, читает полный последний час для channel summary и публикует только при существующем пороге и с сохранением runtime state для дедупликации. Ручной `workflow_dispatch` по умолчанию также безопасен; только ручной запуск с `publish=true` разрешает Telegram-публикацию и обновление runtime state.
+[`main.yml`](.github/workflows/main.yml) запускает collector каждые 10 минут (`7,17,27,37,47,57`, UTC): эти scheduled run используют `DRY_RUN=1`, читают последние 30 минут, сохраняют свежие FACT в Neon, но не публикуют в Telegram. Отдельный scheduled run в `:23` каждые три часа (UTC) использует `DRY_RUN=0`, читает только последний час перед фактическим запуском для channel summary и публикует только при существующем пороге и с сохранением runtime state для дедупликации. Ручной `workflow_dispatch` по умолчанию также безопасен; только ручной запуск с `publish=true` разрешает Telegram-публикацию и обновление runtime state.
 
 Сессия Telethon декодируется из `TELETHON_SESSION_B64` только во временном runner'е GitHub Actions. SMS-авторизация не требуется.
 
