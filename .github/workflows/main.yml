@@ -3,7 +3,13 @@ name: Fuel monitor
 on:
   schedule:
     - cron: "7,17,27,37,47,57 * * * *"
-    - cron: "0 1,4,7,10,13,16,19,22 * * *"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Request publication at a valid Orenburg summary slot
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -27,8 +33,29 @@ jobs:
       PUBLISHED_STATE_PATH: ${{ github.workspace }}/.runtime-state/published-source-messages.json
       HEALTH_STATE_PATH: ${{ github.workspace }}/.runtime-state/health.json
       MAX_PUBLICATION_DELAY_MINUTES: "15"
-      DRY_RUN: ${{ github.event_name == 'schedule' && github.event.schedule == '0 1,4,7,10,13,16,19,22 * * *' && '0' || '1' }}
     steps:
+      - name: Determine execution mode
+        id: mode
+        env:
+          PUBLISH_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && '1' || '0' }}
+        run: |
+          publish=0
+          if [ "$PUBLISH_REQUESTED" = "1" ]; then
+            utc_hour="$(date -u +%H)"
+            utc_minute="$(date -u +%M)"
+            utc_second="$(date -u +%S)"
+            seconds_after_hour=$((10#$utc_minute * 60 + 10#$utc_second))
+            if [ $((10#$utc_hour % 3)) -eq 1 ] && [ "$seconds_after_hour" -le 900 ]; then
+              publish=1
+              echo "PUBLICATION_SLOT_END=$(date -u +%Y-%m-%dT%H:00:00+00:00)" >> "$GITHUB_ENV"
+            fi
+          fi
+          if [ "$publish" -eq 1 ]; then
+            echo "DRY_RUN=0" >> "$GITHUB_ENV"
+          else
+            echo "DRY_RUN=1" >> "$GITHUB_ENV"
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -86,7 +113,7 @@ jobs:
       - name: Run fuel monitor
         run: python -m app.runner
       - name: Update runtime state
-        if: ${{ github.event_name == 'schedule' && github.event.schedule == '0 1,4,7,10,13,16,19,22 * * *' && (success() || failure()) }}
+        if: ${{ steps.mode.outputs.publish == '1' && (success() || failure()) }}
         run: |
           if [ ! -f .runtime-state/published-source-messages.json ] || [ ! -f .runtime-state/health.json ]; then
             echo "Runtime state files are unavailable; no state commit created."

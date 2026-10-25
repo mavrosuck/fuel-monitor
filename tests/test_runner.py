@@ -5,7 +5,13 @@ import pytest
 from app.ai.schema import FuelReportData, MessageParseResult
 from app.collector.models import CollectedMessage
 from app import runner
-from app.runner import LatePublicationError, deduplicate_messages, reports_from_results, scheduled_publication_end
+from app.runner import (
+    LatePublicationError,
+    deduplicate_messages,
+    publication_end,
+    reports_from_results,
+    scheduled_publication_end,
+)
 from app.services.station_normalizer import StationNormalizer
 
 
@@ -213,3 +219,33 @@ def test_publication_slot_is_calculated_in_orenburg_time() -> None:
     assert scheduled_publication_end(delayed, "Asia/Yekaterinburg", 3) == datetime(
         2026, 9, 28, 19, tzinfo=UTC
     )
+
+
+def test_explicit_publication_slot_cannot_jump_to_a_later_slot() -> None:
+    explicit_slot = datetime(2026, 9, 28, 1, tzinfo=UTC)
+    settings = type(
+        "Settings",
+        (),
+        {
+            "publication_slot_end": explicit_slot,
+            "timezone": "Asia/Yekaterinburg",
+            "channel_summary_interval_hours": 3,
+        },
+    )()
+
+    assert publication_end(settings, datetime(2026, 9, 28, 4, 5, tzinfo=UTC)) == explicit_slot
+
+
+def test_explicit_publication_slot_must_match_orenburg_schedule() -> None:
+    settings = type(
+        "Settings",
+        (),
+        {
+            "publication_slot_end": datetime(2026, 9, 28, 2, tzinfo=UTC),
+            "timezone": "Asia/Yekaterinburg",
+            "channel_summary_interval_hours": 3,
+        },
+    )()
+
+    with pytest.raises(ValueError, match="not aligned"):
+        publication_end(settings, datetime(2026, 9, 28, 2, 1, tzinfo=UTC))

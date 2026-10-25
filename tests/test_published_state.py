@@ -19,6 +19,32 @@ def test_missing_state_is_empty_and_distinguishes_platform_and_chat_ids(tmp_path
     store.record_published(state, source_dates, now)
 
     assert set(store.load().published_messages) == set(source_dates)
+    assert store.load().published_slots == {}
+
+
+def test_published_slot_is_recorded_and_blocks_a_duplicate(tmp_path) -> None:
+    store = PublishedMessageStore(tmp_path / "published-source-messages.json")
+    published_at = datetime(2026, 9, 14, 12, 1, tzinfo=UTC)
+    slot_end = datetime(2026, 9, 14, 12, tzinfo=UTC)
+
+    store.record_published(store.load(), {}, published_at, slot_end=slot_end)
+
+    state = store.load()
+    assert store.has_published_slot(state, slot_end)
+    assert state.published_slots == {slot_end.isoformat(): published_at.isoformat()}
+
+
+def test_version_one_state_is_migrated_when_recording_a_slot(tmp_path) -> None:
+    path = tmp_path / "published-source-messages.json"
+    path.write_text('{"version": 1, "published_messages": {}}\n', encoding="utf-8")
+    store = PublishedMessageStore(path)
+    slot_end = datetime(2026, 9, 14, 12, tzinfo=UTC)
+
+    store.record_published(store.load(), {}, slot_end, slot_end=slot_end)
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["version"] == 2
+    assert payload["published_slots"] == {slot_end.isoformat(): slot_end.isoformat()}
 
 
 def test_retention_removes_only_old_published_entries(tmp_path) -> None:

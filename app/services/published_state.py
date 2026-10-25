@@ -15,11 +15,12 @@ class PublishedStateError(RuntimeError):
 @dataclass(frozen=True)
 class PublishedMessageState:
     published_messages: dict[str, dict[str, str]]
+    published_slots: dict[str, str]
     fingerprint: str | None
 
 
 class PublishedMessageStore:
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self, path: str | Path, retention_days: int = 14) -> None:
         self.path = Path(path)
@@ -27,11 +28,12 @@ class PublishedMessageStore:
 
     def load(self) -> PublishedMessageState:
         if not self.path.exists():
-            return PublishedMessageState({}, None)
+            return PublishedMessageState({}, {}, None)
         try:
             raw = self.path.read_bytes()
             payload = json.loads(raw)
-            if payload.get("version") != self.VERSION or not isinstance(payload.get("published_messages"), dict):
+            version = payload.get("version")
+            if version not in (1, self.VERSION) or not isinstance(payload.get("published_messages"), dict):
                 raise ValueError("invalid state shape")
             messages = payload["published_messages"]
             for key, value in messages.items():
@@ -39,15 +41,26 @@ class PublishedMessageStore:
                     raise ValueError("invalid state entry")
                 self._parse_timestamp(value.get("published_at"))
                 self._parse_timestamp(value.get("source_date"))
+            slots = payload.get("published_slots", {})
+            if not isinstance(slots, dict):
+                raise ValueError("invalid published slots")
+            for slot, published_at in slots.items():
+                self._parse_utc_slot(slot)
+                self._parse_timestamp(published_at)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise PublishedStateError("published-message state is malformed or unreadable") from exc
-        return PublishedMessageState(messages, self._fingerprint(raw))
+        return PublishedMessageState(messages, slots, self._fingerprint(raw))
+
+    def has_published_slot(self, state: PublishedMessageState, slot_end: datetime) -> bool:
+        return self._slot_key(slot_end) in state.published_slots
 
     def record_published(
         self,
         state: PublishedMessageState,
         source_dates: dict[str, datetime],
         published_at: datetime,
+        *,
+        slot_end: datetime | None = None,
     ) -> None:
         if published_at.tzinfo is None:
             raise ValueError("published timestamp must be timezone-aware")
@@ -55,6 +68,7 @@ class PublishedMessageStore:
         if current.fingerprint != state.fingerprint:
             raise PublishedStateError("published-message state changed during this run")
         messages = dict(current.published_messages)
+        slots = dict(current.published_slots)
         timestamp = published_at.astimezone(UTC).isoformat()
         for key, source_date in source_dates.items():
             if not self._valid_key(key) or source_date.tzinfo is None:
@@ -69,7 +83,18 @@ class PublishedMessageStore:
             for key, value in messages.items()
             if self._parse_timestamp(value["published_at"]) >= cutoff
         }
-        payload = {"version": self.VERSION, "published_messages": dict(sorted(messages.items()))}
+        if slot_end is not None:
+            slots[self._slot_key(slot_end)] = timestamp
+        slots = {
+            slot: value
+            for slot, value in slots.items()
+            if self._parse_timestamp(value) >= cutoff
+        }
+        payload = {
+            "version": self.VERSION,
+            "published_messages": dict(sorted(messages.items())),
+            "published_slots": dict(sorted(slots.items())),
+        }
         self._write_atomically(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
 
     @staticmethod
@@ -84,6 +109,21 @@ class PublishedMessageStore:
         if timestamp.tzinfo is None:
             raise ValueError("timestamp is timezone-naive")
         return timestamp
+
+    @classmethod
+    def _parse_utc_slot(cls, value: object) -> datetime:
+        timestamp = cls._parse_timestamp(value)
+        if timestamp.utcoffset() != timedelta(0) or any(
+            (timestamp.minute, timestamp.second, timestamp.microsecond)
+        ):
+            raise ValueError("publication slot must be an exact UTC hour")
+        return timestamp
+
+    @classmethod
+    def _slot_key(cls, slot_end: datetime) -> str:
+        if slot_end.tzinfo is None:
+            raise ValueError("publication slot must be timezone-aware")
+        return cls._parse_utc_slot(slot_end.astimezone(UTC).isoformat()).isoformat()
 
     @staticmethod
     def _fingerprint(raw: bytes) -> str:

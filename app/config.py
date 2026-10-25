@@ -1,3 +1,4 @@
+from datetime import datetime
 from functools import lru_cache
 
 from pydantic import Field, SecretStr, field_validator
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     channel_summary_window_minutes: int = Field(default=60, ge=1)
     channel_summary_interval_hours: int = Field(default=3, ge=1, le=24)
     max_publication_delay_minutes: int = Field(default=15, ge=0)
+    publication_slot_end: datetime | None = None
     published_state_path: str = ".runtime-state/published-source-messages.json"
     published_state_retention_days: int = Field(default=14, ge=1)
     health_state_path: str = ".runtime-state/health.json"

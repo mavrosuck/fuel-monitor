@@ -63,6 +63,26 @@ def scheduled_publication_end(now: datetime, timezone: str, interval_hours: int)
     return local_now.replace(hour=slot_hour, minute=0, second=0, microsecond=0).astimezone(UTC)
 
 
+def publication_end(settings, now: datetime) -> datetime:
+    explicit_slot = getattr(settings, "publication_slot_end", None)
+    end = explicit_slot or scheduled_publication_end(
+        now,
+        getattr(settings, "timezone", "Asia/Yekaterinburg"),
+        getattr(settings, "channel_summary_interval_hours", 3),
+    )
+    if end.tzinfo is None:
+        raise ValueError("publication slot must be timezone-aware")
+    end = end.astimezone(UTC)
+    expected = scheduled_publication_end(
+        end,
+        getattr(settings, "timezone", "Asia/Yekaterinburg"),
+        getattr(settings, "channel_summary_interval_hours", 3),
+    )
+    if end != expected:
+        raise ValueError("publication slot is not aligned with the Orenburg summary schedule")
+    return end
+
+
 def ensure_publication_is_timely(now: datetime, scheduled_end: datetime, max_delay_minutes: int) -> None:
     if max_delay_minutes < 0:
         raise ValueError("maximum publication delay cannot be negative")
@@ -112,11 +132,7 @@ async def run_once(now: datetime | None = None) -> str | None:
     end = (
         current
         if dry_run
-        else scheduled_publication_end(
-            current,
-            getattr(settings, "timezone", "Asia/Yekaterinburg"),
-            getattr(settings, "channel_summary_interval_hours", 3),
-        )
+        else publication_end(settings, current)
     )
     window_minutes = (
         getattr(settings, "collector_window_minutes", 30)
@@ -128,6 +144,7 @@ async def run_once(now: datetime | None = None) -> str | None:
     health_store, health_state = _health_state(settings, current)
     metrics = RunMetrics()
     try:
+        slot_already_published = False
         if not dry_run:
             metrics.failure_title = "Scheduled publication skipped because GitHub Actions started late"
             ensure_publication_is_timely(
@@ -135,7 +152,14 @@ async def run_once(now: datetime | None = None) -> str | None:
                 end,
                 getattr(settings, "max_publication_delay_minutes", 15),
             )
-        result = await _run_monitor(settings, start, end, metrics)
+            published_store = PublishedMessageStore(
+                getattr(settings, "published_state_path", ".runtime-state/published-source-messages.json"),
+                getattr(settings, "published_state_retention_days", 14),
+            )
+            if published_store.has_published_slot(published_store.load(), end):
+                logger.info("Publication: skipped (slot %s was already published)", end.isoformat())
+                slot_already_published = True
+        result = None if slot_already_published else await _run_monitor(settings, start, end, metrics)
     except Exception as exc:
         if health_store is not None and health_state is not None:
             try:
@@ -275,7 +299,12 @@ async def _run_monitor_with_optional_persistence(
     try:
         metrics.failure_title = "Telegram publication failed"
         await publisher.publish(summary)
-        published_store.record_published(published_state, source_dates, datetime.now(UTC))
+        published_store.record_published(
+            published_state,
+            source_dates,
+            datetime.now(UTC),
+            slot_end=end,
+        )
         metrics.publication = True
     finally:
         await publisher.close()
