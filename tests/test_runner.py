@@ -91,7 +91,7 @@ def test_dry_run_collector_window_is_thirty_minutes(monkeypatch) -> None:
     assert observed["start"] == end - timedelta(minutes=30)
 
 
-def test_channel_summary_window_is_one_hour(monkeypatch) -> None:
+def test_channel_summary_window_covers_full_three_hour_slot(monkeypatch) -> None:
     observed = {}
 
     class Notifier:
@@ -129,7 +129,7 @@ def test_channel_summary_window_is_one_hour(monkeypatch) -> None:
     asyncio.run(runner.run_once(end))
 
     assert observed["end"] == end
-    assert observed["start"] == end - timedelta(hours=1)
+    assert observed["start"] == end - timedelta(hours=3)
 
 
 def test_small_publication_delay_uses_the_scheduled_orenburg_slot(monkeypatch) -> None:
@@ -169,7 +169,7 @@ def test_small_publication_delay_uses_the_scheduled_orenburg_slot(monkeypatch) -
     asyncio.run(runner.run_once(datetime(2026, 9, 28, 10, 14, tzinfo=UTC)))
 
     assert observed["end"] == datetime(2026, 9, 28, 10, tzinfo=UTC)
-    assert observed["start"] == datetime(2026, 9, 28, 9, tzinfo=UTC)
+    assert observed["start"] == datetime(2026, 9, 28, 7, tzinfo=UTC)
 
 
 def test_late_publication_is_rejected_before_collection(monkeypatch) -> None:

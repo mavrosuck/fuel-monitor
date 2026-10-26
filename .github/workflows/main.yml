@@ -32,6 +32,7 @@ jobs:
       MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
       PUBLISHED_STATE_PATH: ${{ github.workspace }}/.runtime-state/published-source-messages.json
       HEALTH_STATE_PATH: ${{ github.workspace }}/.runtime-state/health.json
+      CHANNEL_SUMMARY_WINDOW_MINUTES: "180"
       MAX_PUBLICATION_DELAY_MINUTES: "15"
     steps:
       - name: Determine execution mode

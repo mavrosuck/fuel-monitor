@@ -137,7 +137,7 @@ async def run_once(now: datetime | None = None) -> str | None:
     window_minutes = (
         getattr(settings, "collector_window_minutes", 30)
         if dry_run
-        else getattr(settings, "channel_summary_window_minutes", 60)
+        else getattr(settings, "channel_summary_window_minutes", 180)
     )
     start = end - timedelta(minutes=window_minutes)
     notifier = _admin_notifier(settings)

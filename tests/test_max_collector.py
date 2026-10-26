@@ -156,6 +156,31 @@ def test_max_collector_paginates_past_five_messages_within_the_hour(tmp_path: Pa
     assert fake.history_calls.count(CHAT_IDS[0]) == 2
 
 
+def test_max_collector_paginates_through_full_three_hour_window(tmp_path: Path) -> None:
+    end = datetime(2026, 9, 14, 12, tzinfo=UTC)
+    start = end - timedelta(hours=3)
+    chat_id = CHAT_IDS[0]
+    chats = [SimpleNamespace(id=chat_id, title="chat")]
+    pages = [
+        [
+            SimpleNamespace(id=1, time=int((end - timedelta(minutes=5)).timestamp() * 1000), text="recent"),
+            SimpleNamespace(id=2, time=int((end - timedelta(hours=1)).timestamp() * 1000), text="one hour"),
+        ],
+        [
+            SimpleNamespace(id=3, time=int((end - timedelta(hours=2)).timestamp() * 1000), text="two hours"),
+            SimpleNamespace(id=4, time=int(start.timestamp() * 1000), text="window boundary"),
+        ],
+    ]
+    fake = PagingWebClient(chats=chats, pages=pages)
+
+    result = asyncio.run(
+        MaxCollector(settings(tmp_path, [chat_id]), client_factory=lambda **_kwargs: fake).collect_since(start, end)
+    )
+
+    assert [message.source_message_id for message in result.messages] == [1, 2, 3, 4]
+    assert fake.history_calls == [chat_id, chat_id]
+
+
 def test_cross_platform_exact_duplicates_are_counted_once_but_different_messages_remain() -> None:
     now = datetime.now(UTC)
     messages = [
