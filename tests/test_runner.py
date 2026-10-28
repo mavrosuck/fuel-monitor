@@ -91,7 +91,7 @@ def test_dry_run_collector_window_is_thirty_minutes(monkeypatch) -> None:
     assert observed["start"] == end - timedelta(minutes=30)
 
 
-def test_channel_summary_window_covers_full_three_hour_slot(monkeypatch) -> None:
+def test_channel_summary_window_covers_full_two_hour_slot(monkeypatch) -> None:
     observed = {}
 
     class Notifier:
@@ -118,18 +118,18 @@ def test_channel_summary_window_covers_full_three_hour_slot(monkeypatch) -> None
             {
                 "dry_run": False,
                 "timezone": "Asia/Yekaterinburg",
-                "channel_summary_interval_hours": 3,
+                "channel_summary_interval_hours": 2,
             },
         )(),
     )
 
-    end = datetime(2026, 9, 28, 10, tzinfo=UTC)
+    end = datetime(2026, 9, 28, 9, tzinfo=UTC)
     import asyncio
 
     asyncio.run(runner.run_once(end))
 
     assert observed["end"] == end
-    assert observed["start"] == end - timedelta(hours=3)
+    assert observed["start"] == end - timedelta(hours=2)
 
 
 def test_small_publication_delay_uses_the_scheduled_orenburg_slot(monkeypatch) -> None:
@@ -159,16 +159,16 @@ def test_small_publication_delay_uses_the_scheduled_orenburg_slot(monkeypatch) -
             {
                 "dry_run": False,
                 "timezone": "Asia/Yekaterinburg",
-                "channel_summary_interval_hours": 3,
+                "channel_summary_interval_hours": 2,
             },
         )(),
     )
 
     import asyncio
 
-    asyncio.run(runner.run_once(datetime(2026, 9, 28, 10, 14, tzinfo=UTC)))
+    asyncio.run(runner.run_once(datetime(2026, 9, 28, 9, 14, tzinfo=UTC)))
 
-    assert observed["end"] == datetime(2026, 9, 28, 10, tzinfo=UTC)
+    assert observed["end"] == datetime(2026, 9, 28, 9, tzinfo=UTC)
     assert observed["start"] == datetime(2026, 9, 28, 7, tzinfo=UTC)
 
 
@@ -197,7 +197,7 @@ def test_late_publication_is_rejected_before_collection(monkeypatch) -> None:
             {
                 "dry_run": False,
                 "timezone": "Asia/Yekaterinburg",
-                "channel_summary_interval_hours": 3,
+                "channel_summary_interval_hours": 2,
                 "max_publication_delay_minutes": 15,
             },
         )(),
@@ -205,7 +205,7 @@ def test_late_publication_is_rejected_before_collection(monkeypatch) -> None:
 
     import asyncio
 
-    now = datetime(2026, 9, 28, 10, 16, tzinfo=UTC)
+    now = datetime(2026, 9, 28, 9, 16, tzinfo=UTC)
     with pytest.raises(LatePublicationError, match="16 minutes late"):
         asyncio.run(runner.run_once(now))
 
@@ -216,7 +216,7 @@ def test_late_publication_is_rejected_before_collection(monkeypatch) -> None:
 def test_publication_slot_is_calculated_in_orenburg_time() -> None:
     delayed = datetime(2026, 9, 28, 19, 12, tzinfo=UTC)
 
-    assert scheduled_publication_end(delayed, "Asia/Yekaterinburg", 3) == datetime(
+    assert scheduled_publication_end(delayed, "Asia/Yekaterinburg", 2) == datetime(
         2026, 9, 28, 19, tzinfo=UTC
     )
 
@@ -229,7 +229,7 @@ def test_explicit_publication_slot_cannot_jump_to_a_later_slot() -> None:
         {
             "publication_slot_end": explicit_slot,
             "timezone": "Asia/Yekaterinburg",
-            "channel_summary_interval_hours": 3,
+            "channel_summary_interval_hours": 2,
         },
     )()
 
@@ -243,7 +243,7 @@ def test_explicit_publication_slot_must_match_orenburg_schedule() -> None:
         {
             "publication_slot_end": datetime(2026, 9, 28, 2, tzinfo=UTC),
             "timezone": "Asia/Yekaterinburg",
-            "channel_summary_interval_hours": 3,
+            "channel_summary_interval_hours": 2,
         },
     )()
 

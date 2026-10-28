@@ -32,7 +32,8 @@ jobs:
       MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
       PUBLISHED_STATE_PATH: ${{ github.workspace }}/.runtime-state/published-source-messages.json
       HEALTH_STATE_PATH: ${{ github.workspace }}/.runtime-state/health.json
-      CHANNEL_SUMMARY_WINDOW_MINUTES: "180"
+      CHANNEL_SUMMARY_WINDOW_MINUTES: "120"
+      CHANNEL_SUMMARY_INTERVAL_HOURS: "2"
       MAX_PUBLICATION_DELAY_MINUTES: "15"
     steps:
       - name: Determine execution mode
@@ -46,7 +47,7 @@ jobs:
             utc_minute="$(date -u +%M)"
             utc_second="$(date -u +%S)"
             seconds_after_hour=$((10#$utc_minute * 60 + 10#$utc_second))
-            if [ $((10#$utc_hour % 3)) -eq 1 ] && [ "$seconds_after_hour" -le 900 ]; then
+            if [ $((10#$utc_hour % 2)) -eq 1 ] && [ "$seconds_after_hour" -le 900 ]; then
               publish=1
               echo "PUBLICATION_SLOT_END=$(date -u +%Y-%m-%dT%H:00:00+00:00)" >> "$GITHUB_ENV"
             fi

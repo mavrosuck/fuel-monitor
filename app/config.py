@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Yekaterinburg"
     min_reports_to_publish: int = Field(default=2, ge=1)
     collector_window_minutes: int = Field(default=30, ge=1)
-    channel_summary_window_minutes: int = Field(default=180, ge=1)
-    channel_summary_interval_hours: int = Field(default=3, ge=1, le=24)
+    channel_summary_window_minutes: int = Field(default=120, ge=1)
+    channel_summary_interval_hours: int = Field(default=2, ge=1, le=24)
     max_publication_delay_minutes: int = Field(default=15, ge=0)
     publication_slot_end: datetime | None = None
     published_state_path: str = ".runtime-state/published-source-messages.json"

@@ -68,7 +68,7 @@ def publication_end(settings, now: datetime) -> datetime:
     end = explicit_slot or scheduled_publication_end(
         now,
         getattr(settings, "timezone", "Asia/Yekaterinburg"),
-        getattr(settings, "channel_summary_interval_hours", 3),
+        getattr(settings, "channel_summary_interval_hours", 2),
     )
     if end.tzinfo is None:
         raise ValueError("publication slot must be timezone-aware")
@@ -76,7 +76,7 @@ def publication_end(settings, now: datetime) -> datetime:
     expected = scheduled_publication_end(
         end,
         getattr(settings, "timezone", "Asia/Yekaterinburg"),
-        getattr(settings, "channel_summary_interval_hours", 3),
+        getattr(settings, "channel_summary_interval_hours", 2),
     )
     if end != expected:
         raise ValueError("publication slot is not aligned with the Orenburg summary schedule")
@@ -137,7 +137,7 @@ async def run_once(now: datetime | None = None) -> str | None:
     window_minutes = (
         getattr(settings, "collector_window_minutes", 30)
         if dry_run
-        else getattr(settings, "channel_summary_window_minutes", 180)
+        else getattr(settings, "channel_summary_window_minutes", 120)
     )
     start = end - timedelta(minutes=window_minutes)
     notifier = _admin_notifier(settings)

@@ -14,7 +14,9 @@ def test_workflow_restores_and_safely_updates_independent_runtime_state_files() 
     assert 'echo "DRY_RUN=0"' in workflow
     assert 'echo "DRY_RUN=1"' in workflow
     assert 'MAX_PUBLICATION_DELAY_MINUTES: "15"' in workflow
-    assert 'CHANNEL_SUMMARY_WINDOW_MINUTES: "180"' in workflow
+    assert 'CHANNEL_SUMMARY_WINDOW_MINUTES: "120"' in workflow
+    assert 'CHANNEL_SUMMARY_INTERVAL_HOURS: "2"' in workflow
+    assert '10#$utc_hour % 2' in workflow
     assert "group: fuel-monitor-production" in workflow
     assert "cancel-in-progress: false" in workflow
     assert "contents: write" in workflow
