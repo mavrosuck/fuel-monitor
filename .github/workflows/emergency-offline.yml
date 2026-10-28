@@ -1,0 +1,33 @@
+name: Emergency offline verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+      - name: Build disabled emergency image
+        run: docker build -t fuel-monitor-emergency:disabled .
+      - name: Verify disabled image cannot start collection
+        run: |
+          docker run --rm --network none --entrypoint python fuel-monitor-emergency:disabled -c '
+          import asyncio
+          from app.emergency_alerts.service import serve
+          try:
+              asyncio.run(serve())
+          except PermissionError:
+              print("PASS: disabled before network, credentials or storage access")
+          else:
+              raise SystemExit("FAIL: activation gate did not stop the service")
+          '

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 from pymax import ExtraConfig, WebClient
 
-from app.emergency_alerts.core import SOURCE_CHANNEL, SourcePost
+from app.emergency_alerts.core import MAX_AGE, SOURCE_CHANNEL, SourcePost
 from app.collector.max_collector import ExistingSessionOnly
 
 
@@ -60,13 +61,36 @@ class PreparedMaxReader:
     async def fetch_recent(self, count: int = 20) -> list[SourcePost]:
         if not 1 <= count <= 100:
             raise ValueError("MAX page size must be 1..100")
-        messages = await self.client.fetch_history(
-            chat_id=self.verified_chat_id,
-            backward=count,
-            get_chat=False,
-            interactive=False,
-        )
-        return [from_verified_message(message, self.verified_chat_id, self.post_url_for_id(str(message.id))) for message in messages]
+        posts = {}
+        cursor = None
+        cutoff = datetime.now(UTC) - MAX_AGE
+        for page in range(10):
+            options = {} if cursor is None else {"from_time": cursor}
+            messages = await self.client.fetch_history(
+                chat_id=self.verified_chat_id, backward=count,
+                get_chat=False, interactive=False, **options,
+            )
+            if not messages:
+                return list(posts.values())
+            batch = []
+            for message in messages:
+                scoped = SimpleNamespace(
+                    id=message.id, time=message.time, text=message.text,
+                    chat_id=getattr(message, "chat_id", None),
+                )
+                if scoped.chat_id is None:
+                    scoped.chat_id = self.verified_chat_id
+                post = from_verified_message(scoped, self.verified_chat_id, self.post_url_for_id(str(scoped.id)))
+                batch.append(post)
+                posts[post.post_id] = post
+            oldest = min(post.published_at for post in batch)
+            if len(messages) < count or oldest < cutoff:
+                return list(posts.values())
+            next_cursor = int(oldest.timestamp() * 1000)
+            if cursor is not None and next_cursor >= cursor:
+                raise RuntimeError("MAX history cursor stalled; coverage cannot be verified")
+            cursor = next_cursor
+        raise RuntimeError("MAX history page limit reached; coverage cannot be verified")
 
 
 def from_verified_message(message: object, verified_chat_id: int, post_url: str) -> SourcePost:

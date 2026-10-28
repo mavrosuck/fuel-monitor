@@ -13,6 +13,11 @@ class RewriteResult(BaseModel):
     text: str
 
 
+class OriginalRewriter:
+    async def rewrite(self, post: SourcePost) -> str:
+        return post.text
+
+
 def validate_rewrite(original: str, candidate: str) -> str:
     candidate = re.sub(r"\s+", " ", candidate).strip()
     if not candidate or len(candidate) > 500:

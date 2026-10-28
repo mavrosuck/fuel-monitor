@@ -117,6 +117,11 @@ def open_store(path: str) -> sqlite3.Connection:
             sent_at TEXT,
             PRIMARY KEY (post_id, revision, destination)
         );
+        CREATE TABLE IF NOT EXISTS worker_health (
+            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+            checked_at TEXT NOT NULL,
+            status TEXT NOT NULL
+        );
     """)
     return connection
 
@@ -137,6 +142,12 @@ def register_post(connection: sqlite3.Connection, post: SourcePost, now: datetim
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     if classify(post) is None:
+        if post.channel_url == SOURCE_CHANNEL:
+            with transaction(connection):
+                connection.execute(
+                    "UPDATE posts SET status='review_edit' WHERE post_id=? AND revision<>?",
+                    (post.post_id, revision(post)),
+                )
         return False
     age = now.astimezone(UTC) - post.published_at.astimezone(UTC)
     status = "pending" if timedelta(0) <= age <= MAX_AGE else "stale"
