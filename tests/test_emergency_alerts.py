@@ -18,7 +18,7 @@ from app.emergency_alerts.core import (
     register_post,
 )
 from app.emergency_alerts import __main__ as emergency_cli
-from app.emergency_alerts.max_source import PreparedMaxReader, from_verified_message
+from app.emergency_alerts.max_source import AuthorizedMaxSession, PreparedMaxReader, from_verified_message
 from app.emergency_alerts.pipeline import EmergencyPipeline
 from app.emergency_alerts.rewrite import GeminiRewriter, validate_rewrite
 from app.emergency_alerts.telegram import EmergencyTelegramSender
@@ -300,6 +300,81 @@ def test_prepared_reader_requests_only_verified_channel():
     reader = PreparedMaxReader(ClientStub(), -42, lambda post_id: f"{SOURCE_CHANNEL}/{post_id}")
     result = asyncio.run(reader.fetch_recent())
     assert len(result) == 1 and result[0].post_id == "123"
+
+
+def test_authorized_max_session_checks_permission_and_channel(tmp_path):
+    session_path = tmp_path / "max.db"
+    session_path.touch()
+    calls = []
+
+    class ClientStub:
+        is_connected = True
+
+        async def connect(self):
+            calls.append("connect")
+
+        async def get_chat(self, chat_id):
+            assert chat_id == -42
+            calls.append("get_chat")
+            return SimpleNamespace(type="CHANNEL", link=SOURCE_CHANNEL)
+
+        async def fetch_history(self, **kwargs):
+            assert kwargs["chat_id"] == -42
+            calls.append("fetch_history")
+            return [SimpleNamespace(id=123, chat_id=-42, time=int(NOW.timestamp() * 1000), text="В Оренбуржье объявлена опасность атаки БПЛА.")]
+
+        async def close(self):
+            calls.append("close")
+
+    def factory(**kwargs):
+        assert kwargs["session_name"] == "max.db"
+        return ClientStub()
+
+    with pytest.raises(PermissionError):
+        AuthorizedMaxSession(str(session_path), -42, False, factory)
+    assert calls == []
+
+    async def read():
+        async with AuthorizedMaxSession(str(session_path), -42, True, factory) as reader:
+            return await reader.fetch_recent()
+
+    assert asyncio.run(read())[0].post_id == "123"
+    assert calls == ["connect", "get_chat", "fetch_history", "close"]
+
+
+def test_authorized_max_session_rejects_other_channel(tmp_path):
+    session_path = tmp_path / "max.db"
+    session_path.touch()
+    calls = []
+
+    class ClientStub:
+        is_connected = True
+
+        async def connect(self):
+            calls.append("connect")
+
+        async def get_chat(self, chat_id):
+            return SimpleNamespace(type="CHAT", link=SOURCE_CHANNEL)
+
+        async def fetch_history(self, **kwargs):
+            raise AssertionError("history must not be read")
+
+        async def close(self):
+            calls.append("close")
+
+    async def read():
+        async with AuthorizedMaxSession(str(session_path), -42, True, lambda **kwargs: ClientStub()):
+            pass
+
+    with pytest.raises(ValueError, match="identity"):
+        asyncio.run(read())
+    assert calls == ["connect", "close"]
+
+
+def test_max_dry_run_requires_platform_permission(monkeypatch):
+    monkeypatch.delenv("EMERGENCY_MAX_PERMISSION_CONFIRMED", raising=False)
+    with pytest.raises(PermissionError, match="permission"):
+        asyncio.run(emergency_cli.max_dry_run())
 
 
 def test_gemini_rewrite_uses_strict_validation():

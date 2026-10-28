@@ -1,9 +1,50 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Callable
 
+from pymax import ExtraConfig, WebClient
+
 from app.emergency_alerts.core import SOURCE_CHANNEL, SourcePost
+from app.collector.max_collector import ExistingSessionOnly
+
+
+class AuthorizedMaxSession:
+    """Open the existing personal session for one verified public channel."""
+
+    def __init__(self, session_path: str, chat_id: int, permission_confirmed: bool, client_factory=WebClient) -> None:
+        if not permission_confirmed:
+            raise PermissionError("MAX automated collection requires platform permission")
+        if not chat_id:
+            raise ValueError("verified MChS channel ID required")
+        path = Path(session_path).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError("existing MAX session is unavailable")
+        self.chat_id = chat_id
+        self.client = client_factory(
+            work_dir=str(path.parent),
+            session_name=path.name,
+            auth_flow=ExistingSessionOnly(),
+            extra_config=ExtraConfig(log_level="WARNING", reconnect=False, telemetry=False),
+        )
+
+    async def __aenter__(self) -> PreparedMaxReader:
+        try:
+            await self.client.connect()
+            if not self.client.is_connected:
+                raise ConnectionError("MAX session did not connect")
+            chat = await self.client.get_chat(self.chat_id)
+            chat_type = getattr(chat, "type", "")
+            if getattr(chat_type, "value", chat_type) != "CHANNEL" or getattr(chat, "link", None) != SOURCE_CHANNEL:
+                raise ValueError("MAX channel identity does not match official MChS link")
+            return PreparedMaxReader(self.client, self.chat_id, lambda post_id: f"{SOURCE_CHANNEL}/{post_id}")
+        except BaseException:
+            await self.client.close()
+            raise
+
+    async def __aexit__(self, *_exc: object) -> None:
+        await self.client.close()
 
 
 class PreparedMaxReader:
