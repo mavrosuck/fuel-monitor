@@ -36,7 +36,7 @@ def validate_rewrite(original: str, candidate: str) -> str:
             raise ValueError("rewrite changed alert status")
     if ("не" in original_words) != ("не" in candidate_words):
         raise ValueError("rewrite changed negation")
-    for marker in ("бпла", "беспилотн", "ракетн", "воздушн", "опасност", "угроз", "ковер", "дорог", "трасс", "движени", "проезд"):
+    for marker in ("бпла", "беспилотн", "ракетн", "воздушн", "авиационн", "опасност", "угроз", "ковер", "дорог", "трасс", "движени", "проезд"):
         if any(word.startswith(marker) for word in original_words) != any(word.startswith(marker) for word in candidate_words):
             raise ValueError("rewrite changed alert subject")
     names = re.findall(r"\b[А-ЯЁ][а-яё]+\b|\b[А-ЯЁ]-\d+\b", original)

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 
 SOURCE_CHANNEL = "https://max.ru/id5610084427_gos"
+SOURCE_CHAT_ID = -69537682153611
 TARGET_CHANNEL = "@benzinoren"
 ORENBURG_TIME = ZoneInfo("Asia/Yekaterinburg")
 MAX_AGE = timedelta(minutes=15)
@@ -34,7 +35,7 @@ def classify(post: SourcePost) -> str | None:
     parsed = urlparse(post.post_url)
     if parsed.scheme != "https" or parsed.netloc != "max.ru" or parsed.query or parsed.fragment:
         return None
-    if parsed.path != f"/id5610084427_gos/{post.post_id}":
+    if post.post_url != SOURCE_CHANNEL:
         return None
     body = re.sub(r"\s+", " ", post.text).strip()
     if not body or len(body) > 3500:
@@ -48,9 +49,9 @@ def classify(post: SourcePost) -> str | None:
         return None
     if re.search(r"предположительн|возможн(?:о|ая|ый)|планиру|не подтвержден|слух", lower):
         return None
-    road = re.search(r"(?:перекры|закры|огранич|возобнов|откры|восстанов|снят|отмен).{0,100}(?:дорог|трасс|движени|проезд)|(?:дорог|трасс|движени|проезд).{0,100}(?:перекры|закры|огранич|возобнов|откры|восстанов|снят|отмен)", lower)
-    threat = re.search(r"(?:беспилотн|бпла|ракетн|воздушн).{0,60}(?:опасност|угроз|атак)|(?:опасност|угроз|атак).{0,60}(?:беспилотн|бпла|ракетн|воздушн)", lower)
-    cancellation = re.search(r"(?:отбой|отмена|отменен|отменена|снята|снят).{0,75}(?:бпла|беспилотн|ракетн|воздушн).{0,35}(?:опасност|угроз|атак)", lower)
+    road = re.search(r"(?:перекры|закры|огранич|прекращ|возобнов|откры|восстанов|снят|отмен).{0,100}(?:дорог|трасс|движени|проезд)|(?:дорог|трасс|движени|проезд).{0,100}(?:перекры|закры|огранич|прекращ|возобнов|откры|восстанов|снят|отмен)", lower)
+    threat = re.search(r"(?:беспилотн|бпла|ракетн|воздушн|авиационн).{0,60}(?:опасност|угроз|атак)|(?:опасност|угроз|атак).{0,60}(?:беспилотн|бпла|ракетн|воздушн|авиационн)", lower)
+    cancellation = re.search(r"(?:отбой|отмена|отменен|отменена|снята|снят).{0,75}(?:бпла|беспилотн|ракетн|воздушн|авиационн).{0,35}(?:опасност|угроз|атак)", lower)
     kover = re.search(r"(?:режим.{0,15})?ковер", lower) and re.search(r"введ|объяв|действ|отмен|снят|отбой", lower)
     return body if road or threat or cancellation or kover else None
 
@@ -62,7 +63,7 @@ def event_transition(post: SourcePost) -> str | None:
     lower = body.casefold().replace("ё", "е")
     if "ковер" in lower:
         return "kover_lifted" if re.search(r"отмен|снят|отбой", lower) else "kover_introduced"
-    if re.search(r"(?:бпла|беспилотн|ракетн|воздушн).{0,60}(?:опасност|угроз|атак)|(?:опасност|угроз|атак).{0,60}(?:бпла|беспилотн|ракетн|воздушн)", lower):
+    if re.search(r"(?:бпла|беспилотн|ракетн|воздушн|авиационн).{0,60}(?:опасност|угроз|атак)|(?:опасност|угроз|атак).{0,60}(?:бпла|беспилотн|ракетн|воздушн|авиационн)", lower):
         return "threat_cleared" if re.search(r"отбой|отмен|снят", lower) else "threat_announced"
     return "road_reopened" if re.search(r"возобнов|откры|восстанов|снят|отмен", lower) else "road_restricted"
 
@@ -72,7 +73,11 @@ def render(post: SourcePost, rewritten: str) -> str:
         raise ValueError("post is not eligible")
     published = post.published_at.astimezone(ORENBURG_TIME).strftime("%d.%m.%Y %H:%M")
     excerpt = "" if rewritten.strip() == post.text.strip() else f"{rewritten.strip()}\n\n"
-    message = f"МЧС Оренбургской области · {published} (Оренбург)\n\n{excerpt}Оригинал: {post.text.strip()}\n\nИсточник: {post.post_url}"
+    message = (
+        f"МЧС Оренбургской области · {published} (Оренбург)\n\n"
+        f"{excerpt}Оригинал: {post.text.strip()}\n\n"
+        f"Источник: {post.channel_url}\nID публикации MAX: {post.post_id}"
+    )
     if len(message) > 4096:
         raise ValueError("emergency message exceeds Telegram limit")
     return message
@@ -121,6 +126,10 @@ def open_store(path: str) -> sqlite3.Connection:
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
             checked_at TEXT NOT NULL,
             status TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS service_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );
     """)
     return connection
@@ -173,6 +182,40 @@ def register_post(connection: sqlite3.Connection, post: SourcePost, now: datetim
         if status == "pending":
             connection.execute("INSERT OR IGNORE INTO deliveries VALUES (?, ?, ?, 'pending', NULL, NULL)", (post.post_id, current_revision, TARGET_CHANNEL))
     return status == "pending"
+
+
+def initialize_without_backfill(
+    connection: sqlite3.Connection,
+    posts: list[SourcePost],
+    now: datetime,
+) -> int:
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    with transaction(connection):
+        initialized = connection.execute(
+            "SELECT value FROM service_state WHERE key='initialized_at'"
+        ).fetchone()
+        if initialized:
+            return 0
+        recorded = 0
+        for post in posts:
+            if classify(post) is None:
+                continue
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO posts VALUES (?, ?, ?, ?, 'baseline')",
+                (
+                    post.post_id,
+                    revision(post),
+                    post.published_at.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            recorded += cursor.rowcount
+        connection.execute(
+            "INSERT INTO service_state VALUES ('initialized_at', ?)",
+            (now.isoformat(),),
+        )
+    return recorded
 
 
 def claim_delivery(connection: sqlite3.Connection, post: SourcePost, destination: str, now: datetime) -> str | None:

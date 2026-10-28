@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
 
 from pymax import ExtraConfig, WebClient
 
-from app.emergency_alerts.core import MAX_AGE, SOURCE_CHANNEL, SourcePost
+from app.emergency_alerts.core import MAX_AGE, SOURCE_CHANNEL, SOURCE_CHAT_ID, SourcePost
 from app.collector.max_collector import ExistingSessionOnly
 
 
@@ -17,11 +17,16 @@ class AuthorizedMaxSession:
     def __init__(self, session_path: str, chat_id: int, permission_confirmed: bool, client_factory=WebClient) -> None:
         if not permission_confirmed:
             raise PermissionError("MAX automated collection requires platform permission")
-        if not chat_id:
-            raise ValueError("verified MChS channel ID required")
-        path = Path(session_path).expanduser().resolve()
-        if not path.is_file():
+        if chat_id != SOURCE_CHAT_ID:
+            raise ValueError("verified MChS channel ID does not match the pinned source")
+        requested_path = Path(session_path).expanduser()
+        if requested_path.is_symlink():
+            raise ValueError("MAX session must be a private regular file, not a symlink")
+        path = requested_path.resolve()
+        if not path.is_file() or not stat.S_ISREG(path.stat().st_mode):
             raise FileNotFoundError("existing MAX session is unavailable")
+        if path.stat().st_mode & 0o077:
+            raise ValueError("MAX session must not be readable or writable by other users")
         self.chat_id = chat_id
         self.client = client_factory(
             work_dir=str(path.parent),
@@ -39,7 +44,7 @@ class AuthorizedMaxSession:
             chat_type = getattr(chat, "type", "")
             if getattr(chat_type, "value", chat_type) != "CHANNEL" or getattr(chat, "link", None) != SOURCE_CHANNEL:
                 raise ValueError("MAX channel identity does not match official MChS link")
-            return PreparedMaxReader(self.client, self.chat_id, lambda post_id: f"{SOURCE_CHANNEL}/{post_id}")
+            return PreparedMaxReader(self.client, self.chat_id)
         except BaseException:
             await self.client.close()
             raise
@@ -51,12 +56,11 @@ class AuthorizedMaxSession:
 class PreparedMaxReader:
     """Read only a verified chat through an already connected, authorized client."""
 
-    def __init__(self, client: object, verified_chat_id: int, post_url_for_id: Callable[[str], str]) -> None:
-        if not verified_chat_id:
-            raise ValueError("verified channel ID required")
+    def __init__(self, client: object, verified_chat_id: int) -> None:
+        if verified_chat_id != SOURCE_CHAT_ID:
+            raise ValueError("verified channel ID does not match the pinned source")
         self.client = client
         self.verified_chat_id = verified_chat_id
-        self.post_url_for_id = post_url_for_id
 
     async def fetch_recent(self, count: int = 20) -> list[SourcePost]:
         if not 1 <= count <= 100:
@@ -80,33 +84,31 @@ class PreparedMaxReader:
                 )
                 if scoped.chat_id is None:
                     scoped.chat_id = self.verified_chat_id
-                post = from_verified_message(scoped, self.verified_chat_id, self.post_url_for_id(str(scoped.id)))
+                post = from_verified_message(scoped, self.verified_chat_id)
                 batch.append(post)
                 posts[post.post_id] = post
             oldest = min(post.published_at for post in batch)
             if len(messages) < count or oldest < cutoff:
                 return list(posts.values())
-            next_cursor = int(oldest.timestamp() * 1000)
+            next_cursor = int(oldest.timestamp() * 1000) - 1
             if cursor is not None and next_cursor >= cursor:
                 raise RuntimeError("MAX history cursor stalled; coverage cannot be verified")
             cursor = next_cursor
         raise RuntimeError("MAX history page limit reached; coverage cannot be verified")
 
 
-def from_verified_message(message: object, verified_chat_id: int, post_url: str) -> SourcePost:
+def from_verified_message(message: object, verified_chat_id: int) -> SourcePost:
     """Convert one message supplied by an independently authorized, connected reader."""
-    if not verified_chat_id or getattr(message, "chat_id", None) != verified_chat_id:
+    if verified_chat_id != SOURCE_CHAT_ID or getattr(message, "chat_id", None) != verified_chat_id:
         raise ValueError("message is not from the verified MChS channel")
     timestamp = int(getattr(message, "time"))
     if timestamp > 10_000_000_000:
         timestamp /= 1000
     post_id = str(getattr(message, "id"))
-    if post_url != f"{SOURCE_CHANNEL}/{post_id}":
-        raise ValueError("unverified MAX post link")
     return SourcePost(
         post_id=post_id,
         channel_url=SOURCE_CHANNEL,
-        post_url=post_url,
+        post_url=SOURCE_CHANNEL,
         published_at=datetime.fromtimestamp(timestamp, UTC),
         text=str(getattr(message, "text") or ""),
     )

@@ -8,11 +8,13 @@ from aiogram.enums import ChatMemberStatus
 
 from app.emergency_alerts.core import (
     SOURCE_CHANNEL,
+    SOURCE_CHAT_ID,
     TARGET_CHANNEL,
     SourcePost,
     claim_delivery,
     classify,
     event_transition,
+    initialize_without_backfill,
     open_store,
     record_removal,
     register_post,
@@ -32,7 +34,7 @@ def post(text: str, **changes) -> SourcePost:
     data = dict(
         post_id="test-post-1",
         channel_url=SOURCE_CHANNEL,
-        post_url=f"{SOURCE_CHANNEL}/test-post-1",
+        post_url=SOURCE_CHANNEL,
         published_at=NOW - timedelta(minutes=2),
         text=text,
     )
@@ -49,6 +51,8 @@ def post(text: str, **changes) -> SourcePost:
     "В Оренбургской области отбой ракетной опасности.",
     "В Оренбургской области объявлена воздушная опасность.",
     "В Оренбургской области отбой воздушной опасности.",
+    "В Оренбургской области объявлена авиационная опасность.",
+    "В Оренбургской области временно прекращено движение по дороге.",
     "В Оренбурге введен режим Ковер.",
     "В Оренбурге отменен режим Ковер.",
     "В Оренбургской области восстановлено движение по трассе.",
@@ -83,9 +87,26 @@ def test_event_transition(text, expected):
     assert event_transition(post(text)) == expected
 
 
+@pytest.mark.parametrize(("text", "expected"), [
+    (
+        "ОТБОЙ ОПАСНОСТИ АТАКИ БЕСПИЛОТНЫХ ЛЕТАТЕЛЬНЫХ АППАРАТОВ "
+        "в Оренбургской области 24.10.2026 12:40. Тел. спасения 112.",
+        "threat_cleared",
+    ),
+    (
+        "ОТМЕНА прекращения движения для всех типов ТС на участке дороги "
+        "Загородное шоссе в Оренбургской области.",
+        "road_reopened",
+    ),
+])
+def test_live_verified_notice_shapes(text, expected):
+    assert classify(post(text)) == text
+    assert event_transition(post(text)) == expected
+
+
 @pytest.mark.parametrize("changes", [
     {"channel_url": "https://max.ru/other"},
-    {"post_url": "https://max.ru/other/test-post-1"},
+    {"post_url": "https://max.ru/other"},
     {"post_url": "https://max.ru/id5610084427_gos/"},
     {"post_url": "https://max.ru/id5610084427_gos/test-post-1?redirect=1"},
     {"post_url": "https://max.ru/id5610084427_gos/another-post"},
@@ -153,6 +174,17 @@ def test_claim_rechecks_freshness(tmp_path):
     assert register_post(connection, source, NOW)
     assert claim_delivery(connection, source, TARGET_CHANNEL, NOW + timedelta(minutes=20)) is None
     assert connection.execute("SELECT status FROM posts").fetchone()[0] == "stale"
+    connection.close()
+
+
+def test_initial_baseline_never_creates_deliveries(tmp_path):
+    connection = open_store(str(tmp_path / "state.db"))
+    source = post("В Оренбуржье объявлена опасность атаки БПЛА.")
+    assert initialize_without_backfill(connection, [source], NOW) == 1
+    assert initialize_without_backfill(connection, [source], NOW) == 0
+    assert connection.execute("SELECT status FROM posts").fetchone() == ("baseline",)
+    assert connection.execute("SELECT COUNT(*) FROM deliveries").fetchone() == (0,)
+    assert not register_post(connection, source, NOW)
     connection.close()
 
 
@@ -251,6 +283,8 @@ def test_telegram_preflight_rejects_wrong_chat():
 
 
 def test_cli_preflight_never_sends(monkeypatch):
+    from app.emergency_alerts import telegram
+
     actions = []
 
     class SenderStub:
@@ -264,7 +298,7 @@ def test_cli_preflight_never_sends(monkeypatch):
             actions.append("closed")
 
     monkeypatch.setenv("BOT_TOKEN", "shared-test-token")
-    monkeypatch.setattr(emergency_cli, "EmergencyTelegramSender", SenderStub)
+    monkeypatch.setattr(telegram, "EmergencyTelegramSender", SenderStub)
     asyncio.run(emergency_cli.telegram_preflight())
     assert actions == ["verified", "closed"]
 
@@ -281,23 +315,22 @@ def test_preflight_workflow_is_manual_and_uses_existing_secret():
 
 
 def test_max_adapter_accepts_only_verified_chat():
-    message = SimpleNamespace(id=123, chat_id=-42, time=int(NOW.timestamp() * 1000), text="В Оренбуржье объявлена опасность атаки БПЛА.")
-    source = from_verified_message(message, -42, f"{SOURCE_CHANNEL}/123")
+    message = SimpleNamespace(id=123, chat_id=SOURCE_CHAT_ID, time=int(NOW.timestamp() * 1000), text="В Оренбуржье объявлена опасность атаки БПЛА.")
+    source = from_verified_message(message, SOURCE_CHAT_ID)
     assert source.channel_url == SOURCE_CHANNEL
+    assert source.post_url == SOURCE_CHANNEL
     assert source.published_at == NOW
     with pytest.raises(ValueError):
-        from_verified_message(message, -41, f"{SOURCE_CHANNEL}/123")
-    with pytest.raises(ValueError, match="unverified MAX post link"):
-        from_verified_message(message, -42, f"{SOURCE_CHANNEL}/999")
+        from_verified_message(message, SOURCE_CHAT_ID + 1)
 
 
 def test_prepared_reader_requests_only_verified_channel():
     class ClientStub:
         async def fetch_history(self, **kwargs):
-            assert kwargs == {"chat_id": -42, "backward": 20, "get_chat": False, "interactive": False}
-            return [SimpleNamespace(id=123, chat_id=-42, time=int(NOW.timestamp() * 1000), text="В Оренбуржье объявлена опасность атаки БПЛА.")]
+            assert kwargs == {"chat_id": SOURCE_CHAT_ID, "backward": 20, "get_chat": False, "interactive": False}
+            return [SimpleNamespace(id=123, chat_id=SOURCE_CHAT_ID, time=int(NOW.timestamp() * 1000), text="В Оренбуржье объявлена опасность атаки БПЛА.")]
 
-    reader = PreparedMaxReader(ClientStub(), -42, lambda post_id: f"{SOURCE_CHANNEL}/{post_id}")
+    reader = PreparedMaxReader(ClientStub(), SOURCE_CHAT_ID)
     result = asyncio.run(reader.fetch_recent())
     assert len(result) == 1 and result[0].post_id == "123"
 
@@ -305,6 +338,7 @@ def test_prepared_reader_requests_only_verified_channel():
 def test_authorized_max_session_checks_permission_and_channel(tmp_path):
     session_path = tmp_path / "max.db"
     session_path.touch()
+    session_path.chmod(0o600)
     calls = []
 
     class ClientStub:
@@ -314,14 +348,14 @@ def test_authorized_max_session_checks_permission_and_channel(tmp_path):
             calls.append("connect")
 
         async def get_chat(self, chat_id):
-            assert chat_id == -42
+            assert chat_id == SOURCE_CHAT_ID
             calls.append("get_chat")
             return SimpleNamespace(type="CHANNEL", link=SOURCE_CHANNEL)
 
         async def fetch_history(self, **kwargs):
-            assert kwargs["chat_id"] == -42
+            assert kwargs["chat_id"] == SOURCE_CHAT_ID
             calls.append("fetch_history")
-            return [SimpleNamespace(id=123, chat_id=-42, time=int(NOW.timestamp() * 1000), text="В Оренбуржье объявлена опасность атаки БПЛА.")]
+            return [SimpleNamespace(id=123, chat_id=SOURCE_CHAT_ID, time=int(NOW.timestamp() * 1000), text="В Оренбуржье объявлена опасность атаки БПЛА.")]
 
         async def close(self):
             calls.append("close")
@@ -331,11 +365,11 @@ def test_authorized_max_session_checks_permission_and_channel(tmp_path):
         return ClientStub()
 
     with pytest.raises(PermissionError):
-        AuthorizedMaxSession(str(session_path), -42, False, factory)
+        AuthorizedMaxSession(str(session_path), SOURCE_CHAT_ID, False, factory)
     assert calls == []
 
     async def read():
-        async with AuthorizedMaxSession(str(session_path), -42, True, factory) as reader:
+        async with AuthorizedMaxSession(str(session_path), SOURCE_CHAT_ID, True, factory) as reader:
             return await reader.fetch_recent()
 
     assert asyncio.run(read())[0].post_id == "123"
@@ -345,6 +379,7 @@ def test_authorized_max_session_checks_permission_and_channel(tmp_path):
 def test_authorized_max_session_rejects_other_channel(tmp_path):
     session_path = tmp_path / "max.db"
     session_path.touch()
+    session_path.chmod(0o600)
     calls = []
 
     class ClientStub:
@@ -363,7 +398,7 @@ def test_authorized_max_session_rejects_other_channel(tmp_path):
             calls.append("close")
 
     async def read():
-        async with AuthorizedMaxSession(str(session_path), -42, True, lambda **kwargs: ClientStub()):
+        async with AuthorizedMaxSession(str(session_path), SOURCE_CHAT_ID, True, lambda **kwargs: ClientStub()):
             pass
 
     with pytest.raises(ValueError, match="identity"):
@@ -371,10 +406,38 @@ def test_authorized_max_session_rejects_other_channel(tmp_path):
     assert calls == ["connect", "close"]
 
 
+def test_authorized_max_session_requires_pinned_id_and_private_file(tmp_path):
+    session_path = tmp_path / "max.db"
+    session_path.touch(mode=0o644)
+    session_path.chmod(0o644)
+    with pytest.raises(ValueError, match="pinned source"):
+        AuthorizedMaxSession(str(session_path), SOURCE_CHAT_ID + 1, True)
+    with pytest.raises(ValueError, match="other users"):
+        AuthorizedMaxSession(str(session_path), SOURCE_CHAT_ID, True)
+    session_path.chmod(0o600)
+    link_path = tmp_path / "max-link.db"
+    link_path.symlink_to(session_path)
+    with pytest.raises(ValueError, match="symlink"):
+        AuthorizedMaxSession(str(link_path), SOURCE_CHAT_ID, True)
+
+
 def test_max_dry_run_requires_platform_permission(monkeypatch):
     monkeypatch.delenv("EMERGENCY_MAX_PERMISSION_CONFIRMED", raising=False)
     with pytest.raises(PermissionError, match="permission"):
         asyncio.run(emergency_cli.max_dry_run())
+
+
+def test_max_dry_run_workflow_is_manual_read_only_and_serialized():
+    from pathlib import Path
+
+    workflow = Path(".github/workflows/emergency-max-dry-run.yml").read_text()
+    assert "workflow_dispatch:" in workflow
+    assert "schedule:" not in workflow
+    assert "group: fuel-monitor-production" in workflow
+    assert "secrets.MAX_SESSION_GZ_B64" in workflow
+    assert "BOT_TOKEN" not in workflow
+    assert "max-dry-run" in workflow
+    assert "send_message" not in workflow
 
 
 def test_gemini_rewrite_uses_strict_validation():

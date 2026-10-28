@@ -5,9 +5,6 @@ services:
     command: [python, -m, app.emergency_alerts, run]
     env_file: .env.emergency
     environment:
-      EMERGENCY_ENABLED: "false"
-      EMERGENCY_MAX_PERMISSION_CONFIRMED: "false"
-      EMERGENCY_SOURCE_VERIFIED: "false"
       EMERGENCY_SQLITE_PATH: /state/alerts.sqlite3
       MAX_SESSION_PATH: /session/max.db
       EMERGENCY_POLL_SECONDS: "30"
@@ -18,7 +15,8 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    restart: "no"
+    init: true
+    restart: unless-stopped
     stop_grace_period: 45s
     healthcheck:
       test: [CMD, python, -m, app.emergency_alerts, health]

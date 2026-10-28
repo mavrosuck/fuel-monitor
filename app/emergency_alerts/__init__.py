@@ -1,1 +1,1 @@
-"""Inactive emergency alert pipeline for the official Orenburg MChS channel."""
+"""Gated emergency alert pipeline for the official Orenburg MChS channel."""

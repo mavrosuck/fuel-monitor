@@ -1,0 +1,47 @@
+name: Emergency MAX read-only dry run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuel-monitor-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EMERGENCY_MAX_PERMISSION_CONFIRMED: "true"
+      EMERGENCY_MAX_CHANNEL_ID: "-69537682153611"
+      MAX_SESSION_PATH: ${{ github.workspace }}/.local/max/max_web_session.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install read-only MAX client
+        run: python -m pip install 'certifi>=2023.7.22' 'maxapi-python>=2.4.1,<2.5' 'tzdata>=2025.2'
+      - name: Restore private MAX session
+        env:
+          MAX_SESSION_GZ_B64: ${{ secrets.MAX_SESSION_GZ_B64 }}
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          import os
+          from pathlib import Path
+
+          session = gzip.decompress(base64.b64decode(os.environ["MAX_SESSION_GZ_B64"], validate=True))
+          if not session:
+              raise RuntimeError("MAX session restore produced an empty file")
+          path = Path(os.environ["MAX_SESSION_PATH"])
+          path.parent.mkdir(parents=True, mode=0o700)
+          path.write_bytes(session)
+          path.chmod(0o600)
+          PY
+      - name: Read verified channel and run isolated pipeline
+        run: python -m app.emergency_alerts max-dry-run
