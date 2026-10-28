@@ -9,7 +9,7 @@ from app.emergency_alerts.telegram import EmergencyTelegramSender
 
 
 async def telegram_preflight() -> None:
-    token = os.environ.get("EMERGENCY_TELEGRAM_BOT_TOKEN", "")
+    token = os.environ.get("BOT_TOKEN", "")
     sender = EmergencyTelegramSender(token)
     try:
         await sender.verify_destination()

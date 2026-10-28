@@ -224,10 +224,8 @@ def test_telegram_sender_enforces_target_without_network(monkeypatch):
 
     monkeypatch.setenv("BOT_TOKEN", "fuel-token")
     with pytest.raises(ValueError):
-        EmergencyTelegramSender("fuel-token", bot_factory=BotStub)
-    with pytest.raises(ValueError):
         EmergencyTelegramSender("token", "@other", bot_factory=BotStub)
-    sender = EmergencyTelegramSender("separate-token", bot_factory=BotStub)
+    sender = EmergencyTelegramSender("fuel-token", bot_factory=BotStub)
     with pytest.raises(ValueError):
         asyncio.run(sender.send("@other", "text"))
     assert asyncio.run(sender.send(TARGET_CHANNEL, "text")) == "9"
@@ -257,7 +255,7 @@ def test_cli_preflight_never_sends(monkeypatch):
 
     class SenderStub:
         def __init__(self, token):
-            assert token == "separate-test-token"
+            assert token == "shared-test-token"
 
         async def verify_destination(self):
             actions.append("verified")
@@ -265,10 +263,21 @@ def test_cli_preflight_never_sends(monkeypatch):
         async def close(self):
             actions.append("closed")
 
-    monkeypatch.setenv("EMERGENCY_TELEGRAM_BOT_TOKEN", "separate-test-token")
+    monkeypatch.setenv("BOT_TOKEN", "shared-test-token")
     monkeypatch.setattr(emergency_cli, "EmergencyTelegramSender", SenderStub)
     asyncio.run(emergency_cli.telegram_preflight())
     assert actions == ["verified", "closed"]
+
+
+def test_preflight_workflow_is_manual_and_uses_existing_secret():
+    from pathlib import Path
+
+    workflow = Path(".github/workflows/emergency-telegram-preflight.yml").read_text()
+    assert "workflow_dispatch:" in workflow
+    assert "schedule:" not in workflow
+    assert "secrets.BOT_TOKEN" in workflow
+    assert "python -m app.emergency_alerts telegram-preflight" in workflow
+    assert "send_message" not in workflow
 
 
 def test_max_adapter_accepts_only_verified_chat():

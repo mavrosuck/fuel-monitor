@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from aiogram import Bot
 
 from app.emergency_alerts.core import TARGET_CHANNEL
@@ -12,9 +10,7 @@ class EmergencyTelegramSender:
         if destination != TARGET_CHANNEL:
             raise ValueError("unauthorized emergency destination")
         if not token:
-            raise ValueError("separate emergency bot token required")
-        if token == os.environ.get("BOT_TOKEN"):
-            raise ValueError("fuel summary bot token cannot be used for emergency alerts")
+            raise ValueError("Telegram bot token required")
         self.bot = bot_factory(token)
         self._verified = False
         self._chat_id: int | None = None
