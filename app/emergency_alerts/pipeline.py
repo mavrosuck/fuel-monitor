@@ -25,6 +25,8 @@ class Rewriter(Protocol):
 
 
 class Sender(Protocol):
+    async def verify_destination(self) -> None: ...
+
     async def send(self, destination: str, text: str) -> str: ...
 
 
@@ -40,10 +42,15 @@ class EmergencyPipeline:
             return False
         try:
             rewritten = validate_rewrite(post.text, await self.rewriter.rewrite(post))
-            message = render(post, rewritten)
         except Exception as error:
             logger.warning("Emergency rewrite unavailable for post %s: %s; using original", post.post_id, type(error).__name__)
-            message = render(post, post.text)
+            rewritten = post.text
+        try:
+            message = render(post, rewritten)
+            await self.sender.verify_destination()
+        except Exception as error:
+            logger.error("Emergency preparation failed for post %s: %s", post.post_id, type(error).__name__)
+            return False
         claimed_revision = claim_delivery(self.connection, post, TARGET_CHANNEL, datetime.now(UTC) if now is None else now)
         if claimed_revision is None:
             return False

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sqlite3
+import stat
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -44,6 +46,8 @@ def classify(post: SourcePost) -> str | None:
         return None
     if re.search(r"учебн|тренировочн|учени[ея]|проверка системы оповещения|фейк|ложн(?:ая|ое|ый) тревог", lower):
         return None
+    if re.search(r"предположительн|возможн(?:о|ая|ый)|планиру|не подтвержден|слух", lower):
+        return None
     road = re.search(r"(?:перекры|закры|огранич|возобнов|откры|восстанов|снят|отмен).{0,100}(?:дорог|трасс|движени|проезд)|(?:дорог|трасс|движени|проезд).{0,100}(?:перекры|закры|огранич|возобнов|откры|восстанов|снят|отмен)", lower)
     threat = re.search(r"(?:беспилотн|бпла|ракетн|воздушн).{0,60}(?:опасност|угроз|атак)|(?:опасност|угроз|атак).{0,60}(?:беспилотн|бпла|ракетн|воздушн)", lower)
     cancellation = re.search(r"(?:отбой|отмена|отменен|отменена|снята|снят).{0,75}(?:бпла|беспилотн|ракетн|воздушн).{0,35}(?:опасност|угроз|атак)", lower)
@@ -67,7 +71,8 @@ def render(post: SourcePost, rewritten: str) -> str:
     if classify(post) is None or not rewritten.strip():
         raise ValueError("post is not eligible")
     published = post.published_at.astimezone(ORENBURG_TIME).strftime("%d.%m.%Y %H:%M")
-    message = f"МЧС Оренбургской области · {published} (Оренбург)\n\n{rewritten.strip()}\n\nОригинал: {post.text.strip()}\n\nИсточник: {post.post_url}"
+    excerpt = "" if rewritten.strip() == post.text.strip() else f"{rewritten.strip()}\n\n"
+    message = f"МЧС Оренбургской области · {published} (Оренбург)\n\n{excerpt}Оригинал: {post.text.strip()}\n\nИсточник: {post.post_url}"
     if len(message) > 4096:
         raise ValueError("emergency message exceeds Telegram limit")
     return message
@@ -78,9 +83,22 @@ def revision(post: SourcePost) -> str:
 
 
 def open_store(path: str) -> sqlite3.Connection:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path, isolation_level=None, timeout=5)
+    store_path = Path(path).expanduser()
+    if not store_path.is_absolute() or store_path == Path(":memory:"):
+        raise ValueError("emergency SQLite path must be absolute and persistent")
+    store_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        descriptor = os.open(store_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        os.close(descriptor)
+    file_stat = store_path.lstat()
+    if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_mode & 0o077:
+        raise ValueError("emergency SQLite file must be private and regular")
+    connection = sqlite3.connect(str(store_path), isolation_level=None, timeout=5)
     connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=FULL")
     connection.execute("PRAGMA busy_timeout=5000")
     connection.executescript("""
         CREATE TABLE IF NOT EXISTS posts (

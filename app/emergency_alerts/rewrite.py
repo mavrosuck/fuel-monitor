@@ -17,6 +17,8 @@ def validate_rewrite(original: str, candidate: str) -> str:
     candidate = re.sub(r"\s+", " ", candidate).strip()
     if not candidate or len(candidate) > 500:
         raise ValueError("rewrite is empty or too long")
+    if candidate not in re.sub(r"\s+", " ", original).strip():
+        raise ValueError("rewrite is not an exact excerpt of the original")
     if re.findall(r"\d+(?:[.,:/–-]\d+)*", original) != re.findall(r"\d+(?:[.,:/–-]\d+)*", candidate):
         raise ValueError("rewrite changed dates, times or road numbers")
     original_words = re.findall(r"[а-яёa-z]+", original.casefold())

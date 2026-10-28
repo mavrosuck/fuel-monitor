@@ -1,8 +1,10 @@
 import asyncio
+import os
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from aiogram.enums import ChatMemberStatus
 
 from app.emergency_alerts.core import (
     SOURCE_CHANNEL,
@@ -15,6 +17,7 @@ from app.emergency_alerts.core import (
     record_removal,
     register_post,
 )
+from app.emergency_alerts import __main__ as emergency_cli
 from app.emergency_alerts.max_source import PreparedMaxReader, from_verified_message
 from app.emergency_alerts.pipeline import EmergencyPipeline
 from app.emergency_alerts.rewrite import GeminiRewriter, validate_rewrite
@@ -62,6 +65,7 @@ def test_allowed_synthetic_notice_shapes(text):
     "В Оренбурге БПЛА летит по траектории к координатам 1, 2.",
     "В Оренбурге расположена воинская часть, закрыта дорога.",
     "В Оренбуржье проходят учебные мероприятия: объявлена опасность атаки БПЛА.",
+    "В Оренбуржье возможно закрытие дороги из-за погоды.",
 ])
 def test_rejected_synthetic_notice_shapes(text):
     assert classify(post(text)) is None
@@ -98,6 +102,7 @@ def test_rewrite_preserves_numbers_status_and_vocabulary():
         "В Оренбургской области открыта дорога Р-239 на 12 км с 10:30.",
         "В Оренбургской области закрыта дорога Р-239 на 13 км с 10:30.",
         "В Оренбургской области закрыта дорога Р-239 на 12 км с 10:30, есть пострадавшие.",
+        "Дорога Р-239 закрыта в Оренбургской области на 12 км с 10:30.",
     ):
         with pytest.raises(ValueError):
             validate_rewrite(original, candidate)
@@ -107,6 +112,7 @@ def test_store_restarts_stale_edits_and_destination(tmp_path):
     path = str(tmp_path / "emergency.db")
     source = post("В Оренбуржье объявлена опасность атаки БПЛА.")
     first = open_store(path)
+    assert os.stat(path).st_mode & 0o077 == 0
     assert register_post(first, source, NOW)
     first.close()
     second = open_store(path)
@@ -123,6 +129,22 @@ def test_store_restarts_stale_edits_and_destination(tmp_path):
     assert not register_post(second, post(source.text, post_id="old", published_at=NOW - timedelta(hours=1)), NOW)
     assert second.execute("SELECT DISTINCT destination FROM deliveries").fetchall() == [(TARGET_CHANNEL,)]
     second.close()
+
+
+def test_store_refuses_ephemeral_or_shared_files(tmp_path):
+    with pytest.raises(ValueError, match="absolute"):
+        open_store(":memory:")
+    with pytest.raises(ValueError, match="absolute"):
+        open_store("relative.db")
+    shared_path = tmp_path / "shared.db"
+    shared_path.touch(mode=0o644)
+    shared_path.chmod(0o644)
+    with pytest.raises(ValueError, match="private"):
+        open_store(str(shared_path))
+    link_path = tmp_path / "link.db"
+    link_path.symlink_to(shared_path)
+    with pytest.raises(ValueError, match="private"):
+        open_store(str(link_path))
 
 
 def test_claim_rechecks_freshness(tmp_path):
@@ -158,6 +180,9 @@ class FakeSender:
     def __init__(self):
         self.sent = []
 
+    async def verify_destination(self):
+        pass
+
     async def send(self, destination, text):
         self.sent.append((destination, text))
         return "123"
@@ -187,14 +212,14 @@ def test_telegram_sender_enforces_target_without_network(monkeypatch):
 
         async def get_chat(self, destination):
             assert destination == TARGET_CHANNEL
-            return SimpleNamespace(id=-9, username="benzinoren")
+            return SimpleNamespace(id=-9, username="benzinoren", type="channel")
 
         async def get_chat_member(self, chat_id, user_id):
             assert (chat_id, user_id) == (-9, 7)
-            return SimpleNamespace(status="administrator", can_post_messages=True)
+            return SimpleNamespace(status=ChatMemberStatus.ADMINISTRATOR, can_post_messages=True)
 
         async def send_message(self, destination, text, **kwargs):
-            assert destination == TARGET_CHANNEL
+            assert destination == -9
             return SimpleNamespace(message_id=9)
 
     monkeypatch.setenv("BOT_TOKEN", "fuel-token")
@@ -217,7 +242,7 @@ def test_telegram_preflight_rejects_wrong_chat():
             return SimpleNamespace(id=7)
 
         async def get_chat(self, destination):
-            return SimpleNamespace(id=-9, username="other")
+            return SimpleNamespace(id=-9, username="other", type="channel")
 
         async def send_message(self, *args, **kwargs):
             raise AssertionError("send must not be reached")
@@ -225,6 +250,25 @@ def test_telegram_preflight_rejects_wrong_chat():
     sender = EmergencyTelegramSender("separate-token", bot_factory=BotStub)
     with pytest.raises(ValueError, match="identity mismatch"):
         asyncio.run(sender.send(TARGET_CHANNEL, "text"))
+
+
+def test_cli_preflight_never_sends(monkeypatch):
+    actions = []
+
+    class SenderStub:
+        def __init__(self, token):
+            assert token == "separate-test-token"
+
+        async def verify_destination(self):
+            actions.append("verified")
+
+        async def close(self):
+            actions.append("closed")
+
+    monkeypatch.setenv("EMERGENCY_TELEGRAM_BOT_TOKEN", "separate-test-token")
+    monkeypatch.setattr(emergency_cli, "EmergencyTelegramSender", SenderStub)
+    asyncio.run(emergency_cli.telegram_preflight())
+    assert actions == ["verified", "closed"]
 
 
 def test_max_adapter_accepts_only_verified_chat():
@@ -292,6 +336,9 @@ def test_unknown_send_result_is_not_retried(tmp_path):
     class UncertainSender:
         calls = 0
 
+        async def verify_destination(self):
+            pass
+
         async def send(self, destination, text):
             self.calls += 1
             raise TimeoutError("unknown Telegram result")
@@ -302,4 +349,25 @@ def test_unknown_send_result_is_not_retried(tmp_path):
     assert not asyncio.run(pipeline.process(source, NOW))
     assert sender.calls == 1
     assert connection.execute("SELECT status FROM deliveries").fetchone()[0] == "claimed"
+    connection.close()
+
+
+def test_telegram_preflight_failure_keeps_delivery_retryable(tmp_path):
+    connection = open_store(str(tmp_path / "state.db"))
+    source = post("В Оренбуржье объявлена опасность атаки БПЛА.")
+
+    class PreflightSender(FakeSender):
+        checks = 0
+
+        async def verify_destination(self):
+            self.checks += 1
+            if self.checks == 1:
+                raise ConnectionError("temporary Telegram outage")
+
+    sender = PreflightSender()
+    pipeline = EmergencyPipeline(connection, FakeRewriter(), sender)
+    assert not asyncio.run(pipeline.process(source, NOW))
+    assert connection.execute("SELECT status FROM deliveries").fetchone()[0] == "pending"
+    assert asyncio.run(pipeline.process(source, NOW))
+    assert len(sender.sent) == 1
     connection.close()

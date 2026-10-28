@@ -17,17 +17,21 @@ class EmergencyTelegramSender:
             raise ValueError("fuel summary bot token cannot be used for emergency alerts")
         self.bot = bot_factory(token)
         self._verified = False
+        self._chat_id: int | None = None
 
     async def verify_destination(self) -> None:
+        if self._verified:
+            return
         bot = await self.bot.get_me()
         chat = await self.bot.get_chat(TARGET_CHANNEL)
-        if str(getattr(chat, "username", "")).casefold() != TARGET_CHANNEL[1:]:
+        if str(getattr(chat, "username", "")).casefold() != TARGET_CHANNEL[1:] or getattr(chat, "type", None) != "channel":
             raise ValueError("Telegram destination identity mismatch")
         membership = await self.bot.get_chat_member(chat.id, bot.id)
-        if str(getattr(membership, "status", "")) not in {"administrator", "creator"}:
+        if getattr(membership, "status", None) not in {"administrator", "creator"}:
             raise ValueError("emergency bot is not a channel administrator")
         if getattr(membership, "can_post_messages", False) is not True:
             raise ValueError("emergency bot cannot post to the channel")
+        self._chat_id = chat.id
         self._verified = True
 
     async def send(self, destination: str, text: str) -> str:
@@ -35,7 +39,7 @@ class EmergencyTelegramSender:
             raise ValueError("unauthorized emergency destination")
         if not self._verified:
             await self.verify_destination()
-        message = await self.bot.send_message(TARGET_CHANNEL, text, disable_web_page_preview=True)
+        message = await self.bot.send_message(self._chat_id, text, disable_web_page_preview=True)
         return str(message.message_id)
 
     async def close(self) -> None:
