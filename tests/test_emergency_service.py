@@ -38,6 +38,18 @@ def test_max_source_imports_without_fuel_settings_dependency():
     assert result.returncode == 0, result.stderr.decode()
 
 
+def test_original_rewrite_imports_without_optional_gemini_dependency():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['google'] = None; import app.emergency_alerts.rewrite",
+        ],
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr.decode()
+
+
 def test_configuration_is_complete_and_pins_source_before_io(monkeypatch):
     values = {
         "BOT_TOKEN": "test-only",

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import re
 
-from google import genai
-from google.genai import types
 from pydantic import BaseModel
 
 from app.emergency_alerts.core import SourcePost
@@ -47,10 +45,14 @@ def validate_rewrite(original: str, candidate: str) -> str:
 
 class GeminiRewriter:
     def __init__(self, api_key: str, model: str) -> None:
+        from google import genai
+
         self.client = genai.Client(api_key=api_key)
         self.model = model
 
     async def rewrite(self, post: SourcePost) -> str:
+        from google.genai import types
+
         response = await self.client.aio.models.generate_content(
             model=self.model,
             contents=post.text,
