@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import re
 import tempfile
 from pathlib import Path
 
@@ -31,9 +30,6 @@ async def max_dry_run() -> None:
         os.environ["MAX_SESSION_PATH"], chat_id, permission_confirmed=True
     ) as reader:
         posts = await reader.fetch_recent()
-    for post in sorted(posts, key=lambda item: item.published_at):
-        excerpt = re.sub(r"\s+", " ", post.text).strip()[:120]
-        print(f"MAX post id={post.post_id} time={post.published_at.isoformat()} excerpt={excerpt!r}")
     from app.emergency_alerts.pipeline import EmergencyPipeline
     from app.emergency_alerts.rewrite import OriginalRewriter
 
@@ -61,7 +57,10 @@ async def max_dry_run() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gated emergency alert preflight and service tools")
-    parser.add_argument("command", choices=("telegram-preflight", "store-check", "max-dry-run", "run", "health"))
+    parser.add_argument(
+        "command",
+        choices=("telegram-preflight", "store-check", "state-decrypt", "max-dry-run", "run", "run-once", "health"),
+    )
     args = parser.parse_args()
     if args.command == "telegram-preflight":
         asyncio.run(telegram_preflight())
@@ -71,6 +70,18 @@ def main() -> None:
         from app.emergency_alerts.service import serve
 
         asyncio.run(serve())
+    elif args.command == "run-once":
+        from app.emergency_alerts.service import run_once
+
+        asyncio.run(run_once())
+    elif args.command == "state-decrypt":
+        from app.emergency_alerts.github_state import decrypt_state
+
+        decrypt_state(
+            os.environ["EMERGENCY_STATE_ENCRYPTED_PATH"],
+            os.environ["EMERGENCY_SQLITE_PATH"],
+        )
+        print("Encrypted emergency state restored and verified.")
     elif args.command == "health":
         from app.emergency_alerts.service import check_health
 

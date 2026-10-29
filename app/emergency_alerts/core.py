@@ -218,6 +218,47 @@ def initialize_without_backfill(
     return recorded
 
 
+def record_baseline_observations(
+    connection: sqlite3.Connection,
+    posts: list[SourcePost],
+    now: datetime,
+) -> int:
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    recorded = 0
+    with transaction(connection):
+        for post in posts:
+            if classify(post) is None:
+                continue
+            current_revision = revision(post)
+            previous = connection.execute(
+                "SELECT revision FROM posts WHERE post_id=?",
+                (post.post_id,),
+            ).fetchone()
+            if previous is None:
+                connection.execute(
+                    "INSERT INTO posts VALUES (?, ?, ?, ?, 'baseline')",
+                    (
+                        post.post_id,
+                        current_revision,
+                        post.published_at.isoformat(),
+                        now.isoformat(),
+                    ),
+                )
+                recorded += 1
+            elif previous[0] != current_revision:
+                connection.execute(
+                    "UPDATE posts SET revision=?, published_at=?, detected_at=?, status='review_edit' WHERE post_id=?",
+                    (
+                        current_revision,
+                        post.published_at.isoformat(),
+                        now.isoformat(),
+                        post.post_id,
+                    ),
+                )
+    return recorded
+
+
 def claim_delivery(connection: sqlite3.Connection, post: SourcePost, destination: str, now: datetime) -> str | None:
     if destination != TARGET_CHANNEL:
         raise ValueError("unauthorized emergency destination")

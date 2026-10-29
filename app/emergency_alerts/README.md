@@ -49,9 +49,9 @@ Run the isolated source check with:
 python -m app.emergency_alerts max-dry-run
 ```
 
-It prints only MAX post IDs, timestamps, short safe excerpts and aggregate
-counts. It uses temporary SQLite state and a no-network preview sender, never
-constructs Telegram and never changes production delivery state. Live runs
+It prints only aggregate counts. It uses temporary SQLite state and a
+no-network preview sender, never constructs Telegram and never changes
+production delivery state. Live runs
 matched real threat, closure, all-clear and reopening notices; no matching item
 was fresh at check time, so nothing was published.
 
@@ -109,3 +109,45 @@ Run `python -m app.emergency_alerts telegram-preflight`, `max-dry-run`, and
 `store-check` on the target environment before setting all activation gates.
 The first production start intentionally establishes a no-send baseline. Keep
 the existing fuel workflow and its two-hour publication behavior unchanged.
+
+## Free GitHub Actions poller
+
+`Emergency MChS GitHub poller` is a separate run-once workflow. It is scheduled
+for minutes 2, 7, 12 and so on to avoid the busiest start-of-hour boundary. Each
+job restores a private copy of the existing MAX session, checks the pinned
+channel and Telegram destination, processes one bounded history window and
+exits. It never keeps a runner alive between polls and does not alter the fuel
+workflow.
+
+GitHub permits scheduled workflows no more frequently than every five minutes.
+Scheduled jobs can be delayed or dropped, so this is best-effort monitoring,
+not a guaranteed emergency service. The existing 15-minute freshness check
+still applies: a delayed run never publishes an old warning. Normal latency is
+roughly zero to five minutes plus runner startup; there is no finite worst-case
+latency when GitHub delays or drops a schedule.
+
+The public repository must have these existing secrets:
+`MAX_SESSION_GZ_B64` and `BOT_TOKEN`. It also needs a dedicated random 32-byte
+base64 secret named `EMERGENCY_STATE_KEY_B64`. Never reuse the MAX session or
+bot token as the encryption key.
+
+SQLite is never uploaded as an Actions artifact or committed in plaintext. The
+workflow encrypts it with AES-256-GCM and stores only
+`emergency-state.aesgcm` on the dedicated `emergency-runtime-state` branch. A
+compare-and-swap push prevents concurrent state overwrites. Before a Telegram
+send, the workflow first persists a `claimed` delivery. It persists `sent`
+after Telegram confirms the message. If the second state update fails, future
+runs stop on the unresolved claim instead of risking a duplicate.
+
+Repository variable `EMERGENCY_GITHUB_PUBLISH_ENABLED` is the cutover switch.
+Keep it `false` while the Mac worker is active. In this mode each GitHub run
+performs real MAX and Telegram preflight reads and advances a no-send baseline.
+After at least two successful runs restore the same encrypted state, stop the
+Mac container without deleting its files, set the variable to `true`, manually
+run the workflow once, and then confirm a later scheduled run. Re-enable the Mac
+worker and set the variable back to `false` if either GitHub run fails.
+
+GitHub Actions logs for a public repository are public. The workflow therefore
+does not print session data, tokens, MAX post IDs, message text, Telegram
+message IDs or decrypted state. Review only aggregate observed/eligible/sent
+counts and the workflow conclusion.

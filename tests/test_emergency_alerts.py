@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import os
+import subprocess
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -17,6 +19,7 @@ from app.emergency_alerts.core import (
     initialize_without_backfill,
     open_store,
     record_removal,
+    record_baseline_observations,
     register_post,
 )
 from app.emergency_alerts import __main__ as emergency_cli
@@ -188,6 +191,17 @@ def test_initial_baseline_never_creates_deliveries(tmp_path):
     connection.close()
 
 
+def test_disabled_github_poll_advances_baseline_without_delivery(tmp_path):
+    connection = open_store(str(tmp_path / "state.db"))
+    first = post("В Оренбуржье объявлена опасность атаки БПЛА.")
+    second = post("В Оренбуржье закрыта дорога.", post_id="test-post-2")
+    assert initialize_without_backfill(connection, [first], NOW) == 1
+    assert record_baseline_observations(connection, [first, second], NOW) == 1
+    assert connection.execute("SELECT COUNT(*) FROM posts WHERE status='baseline'").fetchone() == (2,)
+    assert connection.execute("SELECT COUNT(*) FROM deliveries").fetchone() == (0,)
+    connection.close()
+
+
 def test_restart_marks_unsent_old_post_stale(tmp_path):
     connection = open_store(str(tmp_path / "state.db"))
     source = post("В Оренбуржье объявлена опасность атаки БПЛА.")
@@ -232,6 +246,91 @@ def test_pipeline_dedup_rewrite_failure_and_original(tmp_path):
     assert source.post_url in sender.sent[0][1]
     assert connection.execute("SELECT status, remote_id, sent_at FROM deliveries").fetchone()[0:2] == ("sent", "123")
     connection.close()
+
+
+def test_pipeline_checkpoints_claim_before_send_and_confirmation_after(tmp_path):
+    connection = open_store(str(tmp_path / "state.db"))
+    source = post("В Оренбуржье объявлена опасность атаки БПЛА.")
+    events = []
+
+    class OrderedSender(FakeSender):
+        async def send(self, destination, text):
+            events.append("send")
+            return "123"
+
+    async def checkpoint():
+        status = connection.execute("SELECT status FROM deliveries").fetchone()[0]
+        events.append(f"checkpoint:{status}")
+
+    pipeline = EmergencyPipeline(connection, FakeRewriter(), OrderedSender(), checkpoint)
+    assert asyncio.run(pipeline.process(source, NOW))
+    assert events == ["checkpoint:claimed", "send", "checkpoint:sent"]
+    connection.close()
+
+
+def test_encrypted_github_state_round_trip_and_tamper_detection(tmp_path, monkeypatch):
+    from app.emergency_alerts.github_state import decrypt_state, encrypt_state
+
+    monkeypatch.setenv("EMERGENCY_STATE_KEY_B64", base64.b64encode(b"k" * 32).decode())
+    source = tmp_path / "source.sqlite3"
+    connection = open_store(str(source))
+    initialize_without_backfill(connection, [post("В Оренбуржье объявлена опасность атаки БПЛА.")], NOW)
+    connection.execute("PRAGMA wal_checkpoint(FULL)")
+    connection.close()
+    encrypted = tmp_path / "state.aesgcm"
+    restored = tmp_path / "restored.sqlite3"
+    encrypt_state(str(source), str(encrypted))
+    assert b"test-post-1" not in encrypted.read_bytes()
+    decrypt_state(str(encrypted), str(restored))
+    restored_connection = open_store(str(restored))
+    assert restored_connection.execute("SELECT status FROM posts").fetchone() == ("baseline",)
+    restored_connection.close()
+    payload = bytearray(encrypted.read_bytes())
+    payload[-1] ^= 1
+    encrypted.write_bytes(payload)
+    with pytest.raises(Exception):
+        decrypt_state(str(encrypted), str(restored))
+
+
+def test_github_state_checkpoint_uses_lease_and_keeps_single_encrypted_commit(tmp_path, monkeypatch):
+    from app.emergency_alerts.github_state import GitHubStateCheckpoint, STATE_FILE, decrypt_state
+
+    monkeypatch.setenv("EMERGENCY_STATE_KEY_B64", base64.b64encode(b"s" * 32).decode())
+    remote = tmp_path / "remote.git"
+    repository = tmp_path / "state-repository"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "init", str(repository)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repository), "remote", "add", "origin", str(remote)], check=True)
+    subprocess.run(["git", "-C", str(repository), "checkout", "--orphan", "emergency-runtime-state"], check=True, capture_output=True)
+    source = tmp_path / "source.sqlite3"
+    connection = open_store(str(source))
+    initialize_without_backfill(connection, [post("В Оренбуржье объявлена опасность атаки БПЛА.")], NOW)
+    connection.execute("PRAGMA wal_checkpoint(FULL)")
+    checkpoint = GitHubStateCheckpoint(str(repository), str(source))
+    checkpoint.save()
+    connection.execute("INSERT OR REPLACE INTO service_state VALUES ('test', 'second')")
+    connection.execute("PRAGMA wal_checkpoint(FULL)")
+    checkpoint.save()
+    connection.close()
+    count = subprocess.run(
+        ["git", "--git-dir", str(remote), "rev-list", "--count", "emergency-runtime-state"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert count.stdout.strip() == "1"
+    encrypted = subprocess.run(
+        ["git", "--git-dir", str(remote), "show", f"emergency-runtime-state:{STATE_FILE}"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    encrypted_path = tmp_path / STATE_FILE
+    encrypted_path.write_bytes(encrypted)
+    restored = tmp_path / "restored.sqlite3"
+    decrypt_state(str(encrypted_path), str(restored))
+    restored_connection = open_store(str(restored))
+    assert restored_connection.execute("SELECT value FROM service_state WHERE key='test'").fetchone() == ("second",)
+    restored_connection.close()
 
 
 def test_telegram_sender_enforces_target_without_network(monkeypatch):
@@ -438,6 +537,23 @@ def test_max_dry_run_workflow_is_manual_read_only_and_serialized():
     assert "BOT_TOKEN" not in workflow
     assert "max-dry-run" in workflow
     assert "send_message" not in workflow
+
+
+def test_github_poller_is_run_once_encrypted_and_separate_from_fuel_workflow():
+    from pathlib import Path
+
+    workflow = Path(".github/workflows/emergency-github.yml").read_text()
+    fuel_workflow = Path(".github/workflows/main.yml").read_text()
+    assert 'cron: "2/5 * * * *"' in workflow
+    assert "timeout-minutes: 4" in workflow
+    assert "group: emergency-mchs-github-poller" in workflow
+    assert "secrets.EMERGENCY_STATE_KEY_B64" in workflow
+    assert "vars.EMERGENCY_GITHUB_PUBLISH_ENABLED" in workflow
+    assert "emergency-runtime-state" in workflow
+    assert "upload-artifact" not in workflow
+    assert "run-once" in workflow
+    assert "app.runner" not in workflow
+    assert "emergency-github" not in fuel_workflow
 
 
 def test_gemini_rewrite_uses_strict_validation():

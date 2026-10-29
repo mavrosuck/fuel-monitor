@@ -1,0 +1,75 @@
+name: Emergency MChS GitHub poller
+
+on:
+  schedule:
+    - cron: "2/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: emergency-mchs-github-poller
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      EMERGENCY_ENABLED: "true"
+      EMERGENCY_MAX_PERMISSION_CONFIRMED: "true"
+      EMERGENCY_SOURCE_VERIFIED: "true"
+      EMERGENCY_MAX_CHANNEL_ID: "-69537682153611"
+      EMERGENCY_GITHUB_PUBLISH_ENABLED: ${{ vars.EMERGENCY_GITHUB_PUBLISH_ENABLED == 'true' && 'true' || 'false' }}
+      EMERGENCY_STATE_BRANCH: emergency-runtime-state
+      EMERGENCY_STATE_REPOSITORY: ${{ runner.temp }}/emergency-state
+      EMERGENCY_STATE_ENCRYPTED_PATH: ${{ runner.temp }}/emergency-state/emergency-state.aesgcm
+      EMERGENCY_SQLITE_PATH: ${{ runner.temp }}/runtime/alerts.sqlite3
+      EMERGENCY_STATE_KEY_B64: ${{ secrets.EMERGENCY_STATE_KEY_B64 }}
+      MAX_SESSION_PATH: ${{ runner.temp }}/max/max_web_session.db
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated emergency dependencies
+        run: python -m pip install 'aiogram>=3.13,<4' 'certifi>=2023.7.22' 'cryptography>=43,<51' 'maxapi-python>=2.4.1,<2.5' 'tzdata>=2025.2'
+      - name: Restore private MAX session
+        env:
+          MAX_SESSION_GZ_B64: ${{ secrets.MAX_SESSION_GZ_B64 }}
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          import os
+          from pathlib import Path
+
+          session = gzip.decompress(base64.b64decode(os.environ["MAX_SESSION_GZ_B64"], validate=True))
+          if not session:
+              raise RuntimeError("MAX session restore produced an empty file")
+          path = Path(os.environ["MAX_SESSION_PATH"])
+          path.parent.mkdir(parents=True, mode=0o700)
+          path.write_bytes(session)
+          path.chmod(0o600)
+          PY
+      - name: Prepare encrypted state worktree
+        run: |
+          if git fetch --no-tags --depth=1 origin "$EMERGENCY_STATE_BRANCH"; then
+            git worktree add --detach "$EMERGENCY_STATE_REPOSITORY" FETCH_HEAD
+            git -C "$EMERGENCY_STATE_REPOSITORY" checkout -B "$EMERGENCY_STATE_BRANCH"
+          else
+            git worktree add --detach "$EMERGENCY_STATE_REPOSITORY" HEAD
+            git -C "$EMERGENCY_STATE_REPOSITORY" checkout --orphan "$EMERGENCY_STATE_BRANCH"
+            git -C "$EMERGENCY_STATE_REPOSITORY" rm -rf .
+          fi
+      - name: Restore and verify encrypted deduplication state
+        run: |
+          if [ -f "$EMERGENCY_STATE_ENCRYPTED_PATH" ]; then
+            python -m app.emergency_alerts state-decrypt
+          fi
+      - name: Poll verified source once and exit
+        run: python -m app.emergency_alerts run-once
