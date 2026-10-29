@@ -550,6 +550,8 @@ def test_github_poller_is_run_once_encrypted_and_separate_from_fuel_workflow():
     assert "secrets.EMERGENCY_STATE_KEY_B64" in workflow
     assert "vars.EMERGENCY_GITHUB_PUBLISH_ENABLED" in workflow
     assert "emergency-runtime-state" in workflow
+    assert 'workflows: ["Fuel monitor"]' in workflow
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in workflow
     assert "upload-artifact" not in workflow
     assert "run-once" in workflow
     assert "app.runner" not in workflow

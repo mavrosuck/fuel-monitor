@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: "2/5 * * * *"
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Fuel monitor"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -14,6 +18,12 @@ concurrency:
 
 jobs:
   poll:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:

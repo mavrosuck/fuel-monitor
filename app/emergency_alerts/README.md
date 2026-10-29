@@ -119,6 +119,13 @@ channel and Telegram destination, processes one bounded history window and
 exits. It never keeps a runner alive between polls and does not alter the fuel
 workflow.
 
+The existing external hourly `workflow_dispatch` for `Fuel monitor` also
+starts this poller after a successful default-branch run. The trigger is
+accepted only for the same repository, `main`, and `workflow_dispatch`; it does
+not check out artifacts or code from the triggering run. This is only a
+fallback because an hourly run cannot recover an alert that is already older
+than the 15-minute freshness limit.
+
 GitHub permits scheduled workflows no more frequently than every five minutes.
 Scheduled jobs can be delayed or dropped, so this is best-effort monitoring,
 not a guaranteed emergency service. The existing 15-minute freshness check
