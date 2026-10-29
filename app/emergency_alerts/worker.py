@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -21,8 +22,12 @@ async def run_forever(reader: Reader, pipeline: EmergencyPipeline, stop: asyncio
         raise ValueError("poll interval must be positive")
     failures = 0
     while not stop.is_set():
+        poll_started = time.monotonic()
+        post_count = 0
+        error_type = ""
         try:
             posts = await asyncio.wait_for(reader.fetch_recent(), timeout=30)
+            post_count = len(posts)
             for post in sorted(posts, key=lambda item: item.published_at):
                 await asyncio.wait_for(pipeline.process(post), timeout=30)
             failures = 0
@@ -30,10 +35,24 @@ async def run_forever(reader: Reader, pipeline: EmergencyPipeline, stop: asyncio
             raise
         except Exception as error:
             failures += 1
+            error_type = type(error).__name__
             logger.error("Emergency polling failed: %s; retrying after delay", type(error).__name__)
+        checked_at = datetime.now(UTC).isoformat()
+        duration_ms = max(0, round((time.monotonic() - poll_started) * 1000))
         pipeline.connection.execute(
             "INSERT OR REPLACE INTO worker_health VALUES (1, ?, ?)",
-            (datetime.now(UTC).isoformat(), "error" if failures else "ok"),
+            (checked_at, "error" if failures else "ok"),
+        )
+        metrics = {
+            "last_poll_completed_at": checked_at,
+            "last_poll_duration_ms": str(duration_ms),
+            "last_poll_post_count": str(post_count),
+            "consecutive_poll_failures": str(failures),
+            "last_poll_error_type": error_type,
+        }
+        pipeline.connection.executemany(
+            "INSERT OR REPLACE INTO service_state VALUES (?, ?)",
+            metrics.items(),
         )
         delay = max(interval_seconds, min(300, interval_seconds * 2 ** min(failures, 8)))
         try:

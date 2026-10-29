@@ -1,9 +1,10 @@
 services:
   emergency:
     profiles: [emergency]
+    image: ${EMERGENCY_IMAGE:-fuel-monitor-emergency:local}
     build: .
     command: [python, -m, app.emergency_alerts, run]
-    env_file: .env.emergency
+    env_file: ${EMERGENCY_ENV_FILE:-.env.emergency}
     environment:
       EMERGENCY_SQLITE_PATH: /state/alerts.sqlite3
       MAX_SESSION_PATH: /session/max.db
@@ -12,12 +13,21 @@ services:
       - ${EMERGENCY_STATE_DIR:?durable private directory required}:/state
       - ${EMERGENCY_SESSION_DIR:?existing private session directory required}:/session
     read_only: true
-    tmpfs: [/tmp]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
     init: true
     restart: unless-stopped
     stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     healthcheck:
       test: [CMD, python, -m, app.emergency_alerts, health]
       interval: 30s

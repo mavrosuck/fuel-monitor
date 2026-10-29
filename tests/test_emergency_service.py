@@ -2,6 +2,7 @@ import asyncio
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -171,3 +172,23 @@ def test_max_preview_uses_isolated_pipeline_without_telegram(monkeypatch, capsys
     monkeypatch.setattr(telegram, "EmergencyTelegramSender", forbidden)
     asyncio.run(cli.max_dry_run())
     assert "1 fresh previews" in capsys.readouterr().out
+
+
+def test_server_deployment_is_hardened_and_separate_from_fuel_runner():
+    compose = Path("compose.emergency.yml").read_text()
+    unit = Path("deploy/emergency/fuel-monitor-emergency.service").read_text()
+    manager = Path("deploy/emergency/manage.sh").read_text()
+    assert "profiles: [emergency]" in compose
+    assert "cap_drop: [ALL]" in compose
+    assert "no-new-privileges:true" in compose
+    assert "read_only: true" in compose
+    assert "pids_limit: 128" in compose
+    assert "mem_limit: 256m" in compose
+    assert "max-size: 10m" in compose
+    assert "After=network-online.target docker.service" in unit
+    assert "WantedBy=multi-user.target" in unit
+    assert "wait-healthy.sh 180" in unit
+    assert "previous-image" in manager
+    assert 'build) build ;;' in manager
+    assert "docker inspect --format" in manager
+    assert "app.runner" not in unit

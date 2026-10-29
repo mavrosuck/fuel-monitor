@@ -1,0 +1,25 @@
+[Unit]
+Description=Orenburg MChS emergency monitor
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+ConditionPathExists=/etc/fuel-monitor-emergency/runtime.env
+ConditionPathExists=/etc/fuel-monitor-emergency/image.env
+ConditionPathExists=/var/lib/fuel-monitor-emergency/session/max.db
+ConditionPathExists=/var/lib/fuel-monitor-emergency/state/alerts.sqlite3
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/fuel-monitor-emergency/current
+Environment=EMERGENCY_ENV_FILE=/etc/fuel-monitor-emergency/runtime.env
+ExecStartPre=/usr/bin/docker compose --project-name fuel-monitor-emergency --env-file /etc/fuel-monitor-emergency/image.env --env-file /etc/fuel-monitor-emergency/runtime.env -f /opt/fuel-monitor-emergency/current/compose.emergency.yml config --quiet
+ExecStart=/usr/bin/docker compose --project-name fuel-monitor-emergency --env-file /etc/fuel-monitor-emergency/image.env --env-file /etc/fuel-monitor-emergency/runtime.env -f /opt/fuel-monitor-emergency/current/compose.emergency.yml up -d --no-build emergency
+ExecStartPost=/opt/fuel-monitor-emergency/current/deploy/emergency/wait-healthy.sh 180
+ExecReload=/usr/bin/docker compose --project-name fuel-monitor-emergency --env-file /etc/fuel-monitor-emergency/image.env --env-file /etc/fuel-monitor-emergency/runtime.env -f /opt/fuel-monitor-emergency/current/compose.emergency.yml up -d --no-build emergency
+ExecStop=/usr/bin/docker compose --project-name fuel-monitor-emergency --env-file /etc/fuel-monitor-emergency/image.env --env-file /etc/fuel-monitor-emergency/runtime.env -f /opt/fuel-monitor-emergency/current/compose.emergency.yml stop -t 45 emergency
+TimeoutStartSec=240
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

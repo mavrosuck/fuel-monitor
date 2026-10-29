@@ -473,6 +473,11 @@ def test_worker_recovers_after_read_error(tmp_path):
     asyncio.run(run_forever(reader, pipeline, stop, interval_seconds=0.001))
     assert reader.calls == 2
     assert len(sender.sent) == 1
+    metrics = dict(connection.execute("SELECT key, value FROM service_state").fetchall())
+    assert metrics["last_poll_post_count"] == "1"
+    assert metrics["consecutive_poll_failures"] == "0"
+    assert metrics["last_poll_error_type"] == ""
+    assert int(metrics["last_poll_duration_ms"]) >= 0
     connection.close()
 
 
