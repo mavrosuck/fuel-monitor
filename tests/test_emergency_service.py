@@ -26,6 +26,18 @@ def test_cli_preflight_imports_without_max_or_gemini():
     assert result.returncode == 0, result.stderr.decode()
 
 
+def test_max_source_imports_without_fuel_settings_dependency():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['pydantic_settings'] = None; import app.emergency_alerts.max_source",
+        ],
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr.decode()
+
+
 def test_configuration_is_complete_and_pins_source_before_io(monkeypatch):
     values = {
         "BOT_TOKEN": "test-only",

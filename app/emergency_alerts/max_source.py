@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import os
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import certifi
+
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
 from pymax import ExtraConfig, WebClient
 
 from app.emergency_alerts.core import MAX_AGE, SOURCE_CHANNEL, SOURCE_CHAT_ID, SourcePost
-from app.collector.max_collector import ExistingSessionOnly
+
+
+class ExistingEmergencySessionOnly:
+    async def authenticate(self, _app: object) -> None:
+        raise RuntimeError("saved MAX WebClient session is invalid or expired")
 
 
 class AuthorizedMaxSession:
@@ -31,7 +40,7 @@ class AuthorizedMaxSession:
         self.client = client_factory(
             work_dir=str(path.parent),
             session_name=path.name,
-            auth_flow=ExistingSessionOnly(),
+            auth_flow=ExistingEmergencySessionOnly(),
             extra_config=ExtraConfig(log_level="WARNING", reconnect=False, telemetry=False),
         )
 

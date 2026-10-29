@@ -51,9 +51,9 @@ python -m app.emergency_alerts max-dry-run
 
 It prints only MAX post IDs, timestamps, short safe excerpts and aggregate
 counts. It uses temporary SQLite state and a no-network preview sender, never
-constructs Telegram and never changes production delivery state. A live run read
-20 official posts, matched two old real closure/cancellation notices, produced
-zero fresh previews and sent nothing.
+constructs Telegram and never changes production delivery state. Live runs
+matched real threat, closure, all-clear and reopening notices; no matching item
+was fresh at check time, so nothing was published.
 
 ## Filtering and delivery safety
 
