@@ -23,11 +23,11 @@ jobs:
       EMERGENCY_MAX_CHANNEL_ID: "-69537682153611"
       EMERGENCY_GITHUB_PUBLISH_ENABLED: ${{ vars.EMERGENCY_GITHUB_PUBLISH_ENABLED == 'true' && 'true' || 'false' }}
       EMERGENCY_STATE_BRANCH: emergency-runtime-state
-      EMERGENCY_STATE_REPOSITORY: ${{ runner.temp }}/emergency-state
-      EMERGENCY_STATE_ENCRYPTED_PATH: ${{ runner.temp }}/emergency-state/emergency-state.aesgcm
-      EMERGENCY_SQLITE_PATH: ${{ runner.temp }}/runtime/alerts.sqlite3
+      EMERGENCY_STATE_REPOSITORY: /tmp/fuel-monitor-emergency-state
+      EMERGENCY_STATE_ENCRYPTED_PATH: /tmp/fuel-monitor-emergency-state/emergency-state.aesgcm
+      EMERGENCY_SQLITE_PATH: /tmp/fuel-monitor-emergency-runtime/alerts.sqlite3
       EMERGENCY_STATE_KEY_B64: ${{ secrets.EMERGENCY_STATE_KEY_B64 }}
-      MAX_SESSION_PATH: ${{ runner.temp }}/max/max_web_session.db
+      MAX_SESSION_PATH: /tmp/fuel-monitor-emergency-max/max_web_session.db
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
     steps:
       - uses: actions/checkout@v4
