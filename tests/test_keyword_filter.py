@@ -1,4 +1,4 @@
-from app.services.keyword_filter import is_keyword_relevant
+from app.services.keyword_filter import is_keyword_relevant, keyword_relevance
 
 
 def test_keyword_filter() -> None:
@@ -11,3 +11,7 @@ def test_keyword_filter_keeps_short_natural_fuel_reports() -> None:
     assert is_keyword_relevant("На Победе 95 есть")
     assert is_keyword_relevant("Терешковой без 92")
     assert is_keyword_relevant("На Монтажников только дизель")
+
+
+def test_keyword_filter_does_not_expand_ambiguous_gas_discussion() -> None:
+    assert keyword_relevance("Газ сегодня обсуждают в чате") == (False, "no_fuel_keyword")

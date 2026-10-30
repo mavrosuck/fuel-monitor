@@ -31,6 +31,20 @@ def test_reposts_are_counted_once_before_gemini() -> None:
     assert unique[0].source_message_id == 2
 
 
+def test_diagnostic_source_counts_redact_source_names_and_identifiers() -> None:
+    messages = [
+        CollectedMessage("max", -777, 1, datetime.now(UTC), "private text", "private MAX chat"),
+        CollectedMessage("max", -777, 2, datetime.now(UTC), "more private text", "private MAX chat"),
+        CollectedMessage("telegram", 999, 3, datetime.now(UTC), "another private text", "private Telegram chat"),
+    ]
+
+    diagnostics = runner.diagnostic_source_counts(messages)
+
+    assert diagnostics == "max#1=2 telegram#1=1"
+    assert "777" not in diagnostics
+    assert "private" not in diagnostics
+
+
 def test_facts_become_aggregatable_reports() -> None:
     source = message(1, "На Лукойле есть АИ-95")
     parsed = MessageParseResult(

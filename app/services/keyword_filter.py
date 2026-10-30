@@ -10,6 +10,13 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def is_keyword_relevant(text: str) -> bool:
+def keyword_relevance(text: str) -> tuple[bool, str]:
     normalized = normalize_text(text)
-    return any(keyword.replace("-", "") in normalized.replace("-", "") for keyword in KEYWORDS)
+    normalized_without_hyphens = normalized.replace("-", "")
+    if any(keyword.replace("-", "") in normalized_without_hyphens for keyword in KEYWORDS):
+        return True, "matched_keyword"
+    return False, "no_fuel_keyword"
+
+
+def is_keyword_relevant(text: str) -> bool:
+    return keyword_relevance(text)[0]

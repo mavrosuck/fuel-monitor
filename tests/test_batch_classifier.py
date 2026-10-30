@@ -45,3 +45,16 @@ def test_obvious_local_noise_makes_zero_gemini_calls() -> None:
     result = asyncio.run(BatchClassifier(parser).classify(messages))
     assert parser.calls == 0
     assert result.locally_irrelevant_ids == {1}
+
+
+def test_local_filter_exposes_safe_reason_codes_without_changing_matches() -> None:
+    parser = CountingParser()
+    messages = [
+        TextMessage(1, datetime(2026, 8, 28, tzinfo=UTC), "На АЗС есть АИ-95"),
+        TextMessage(2, datetime(2026, 8, 28, tzinfo=UTC), "Доброе утро всем"),
+    ]
+
+    result = asyncio.run(BatchClassifier(parser).classify(messages))
+
+    assert result.local_relevance_reasons == {1: "matched_keyword", 2: "no_fuel_keyword"}
+    assert result.locally_irrelevant_ids == {2}

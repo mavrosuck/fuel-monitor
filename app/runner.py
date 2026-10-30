@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -51,6 +52,33 @@ def deduplicate_messages(messages: list[CollectedMessage]) -> list[CollectedMess
 
 def source_key(message: CollectedMessage) -> str:
     return f"{message.platform}|{message.source_chat_id}|{message.source_message_id}"
+
+
+def diagnostic_source_counts(messages: list[CollectedMessage]) -> str:
+    """Return per-source counts without exposing source identifiers or titles."""
+    labels: dict[tuple[str, int], str] = {}
+    counts: Counter[str] = Counter()
+    per_platform_index: Counter[str] = Counter()
+    for message in messages:
+        source = (message.platform, message.source_chat_id)
+        if source not in labels:
+            per_platform_index[message.platform] += 1
+            labels[source] = f"{message.platform}#{per_platform_index[message.platform]}"
+        counts[labels[source]] += 1
+    return " ".join(f"{label}={count}" for label, count in counts.items()) or "none"
+
+
+def configured_source_counts(platform: str, sources: list[object], messages: list[CollectedMessage]) -> str:
+    counts = []
+    for index, source in enumerate(sources, start=1):
+        count = sum(message.platform == platform and message.source_name == source for message in messages)
+        counts.append(f"{platform}#{index}={count}")
+    return " ".join(counts)
+
+
+def diagnostic_reason_counts(reason_codes: dict[int, str]) -> str:
+    counts = Counter(reason_codes.values())
+    return " ".join(f"{reason}={count}" for reason, count in sorted(counts.items())) or "none"
 
 
 def scheduled_publication_end(now: datetime, timezone: str, interval_hours: int) -> datetime:
@@ -220,12 +248,16 @@ async def _run_monitor_with_optional_persistence(
     persistence: NeonFactsPersistence | None,
 ) -> str | None:
     logger.info("Window: %s -> %s", start.isoformat(), end.isoformat())
+    logger.info(
+        "Diagnostics: coverage_start=%s coverage_end=%s coverage_minutes=%d",
+        start.isoformat(),
+        end.isoformat(),
+        int((end - start).total_seconds() // 60),
+    )
     metrics.failure_title = "Telegram collection failed"
     telegram_messages = await TelegramCollector(settings).collect_since(start, end)
     metrics.telegram_collected = len(telegram_messages)
-    logger.info("Telegram:")
-    for source in settings.source_chats:
-        logger.info("  %s: %d", source, sum(message.source_name == source for message in telegram_messages))
+    configured_counts = [configured_source_counts("telegram", settings.source_chats, telegram_messages)]
     messages = list(telegram_messages)
     if settings.max_enabled:
         metrics.failure_title = "MAX collection failed"
@@ -234,34 +266,58 @@ async def _run_monitor_with_optional_persistence(
         except MaxCollectionError as exc:
             logger.error("MAX collection failed; publication blocked: %s", exc)
             raise RuntimeError("MAX collection failed; publication blocked") from exc
-        logger.info("MAX:")
-        for chat_id in settings.max_source_chat_ids:
-            logger.info("  %s: %d", max_collection.chat_titles[chat_id], max_collection.message_counts[chat_id])
+        configured_counts.append(
+            " ".join(
+                f"max#{index}={max_collection.message_counts[chat_id]}"
+                for index, chat_id in enumerate(settings.max_source_chat_ids, start=1)
+            )
+        )
         messages.extend(max_collection.messages)
         metrics.max_collected = len(max_collection.messages)
+    logger.info("Diagnostics: collected_by_source %s", " ".join(count for count in configured_counts if count) or "none")
     logger.info("Total before dedupe: %d", len(messages))
+    total_before_deduplication = len(messages)
     messages = deduplicate_messages(messages)
     logger.info("After dedupe: %d", len(messages))
+    logger.info("Diagnostics: duplicate_messages_removed=%d", total_before_deduplication - len(messages))
     published_store = PublishedMessageStore(
         getattr(settings, "published_state_path", ".runtime-state/published-source-messages.json"),
         getattr(settings, "published_state_retention_days", 14),
     )
     published_state = published_store.load()
     unpublished_messages = [message for message in messages if source_key(message) not in published_state.published_messages]
-    logger.info("Already published source messages skipped: %d", len(messages) - len(unpublished_messages))
+    already_published = len(messages) - len(unpublished_messages)
+    logger.info("Already published source messages skipped: %d", already_published)
+    logger.info("Diagnostics: previously_published_removed=%d eligible_for_classification=%d", already_published, len(unpublished_messages))
     messages = unpublished_messages
     metrics.failure_title = "Gemini request failed after retries"
     classifier = BatchClassifier(FuelAIParser(settings.gemini_api_key.get_secret_value(), settings.gemini_model))
     classified = await classifier.classify(
         [TextMessage(index, item.message_date, item.text) for index, item in enumerate(messages, start=1)]
     )
-    logger.info("Locally relevant: %d", len(messages) - len(classified.locally_irrelevant_ids))
+    locally_relevant = len(messages) - len(classified.locally_irrelevant_ids)
+    logger.info("Locally relevant: %d", locally_relevant)
+    logger.info(
+        "Diagnostics: local_filter passed=%d failed=%d reason_codes=%s",
+        locally_relevant,
+        len(classified.locally_irrelevant_ids),
+        diagnostic_reason_counts(classified.local_relevance_reasons),
+    )
     factual_messages = [
         item
         for index, item in enumerate(messages, start=1)
         if (parsed := classified.results_by_message_id.get(index)) and parsed.has_new_fuel_information
     ]
     logger.info("Gemini FACT messages: %d", len(factual_messages))
+    gemini_returned = len(classified.results_by_message_id)
+    logger.info(
+        "Diagnostics: gemini submitted=%d returned=%d fact=%d non_fact=%d missing=%d",
+        locally_relevant,
+        gemini_returned,
+        len(factual_messages),
+        gemini_returned - len(factual_messages),
+        locally_relevant - gemini_returned,
+    )
     normalizer = StationNormalizer()
     if persistence is not None:
         await _persist_classified_results(messages, classified.results_by_message_id, normalizer, persistence)
@@ -270,8 +326,19 @@ async def _run_monitor_with_optional_persistence(
     metrics.publishable_facts = publishable_fuel_facts(aggregated)
     logger.info("Aggregated stations: %d", len(aggregated))
     logger.info("Publishable fuel facts: %d", metrics.publishable_facts)
+    logger.info(
+        "Diagnostics: aggregation reports=%d aggregated=%d publishable_facts=%d min_reports_to_publish=%d",
+        len(reports),
+        len(aggregated),
+        metrics.publishable_facts,
+        settings.min_reports_to_publish,
+    )
     if not publication_allowed(aggregated, settings.min_reports_to_publish):
-        logger.info("Publication: skipped (<%d fuel facts)", settings.min_reports_to_publish)
+        logger.info(
+            "Publication: skipped reason=below_minimum_fuel_facts publishable_facts=%d min_reports_to_publish=%d",
+            metrics.publishable_facts,
+            settings.min_reports_to_publish,
+        )
         return None
     summary = format_styled_summary(aggregated, end, settings.timezone)
     if settings.dry_run:

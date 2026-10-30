@@ -17,7 +17,7 @@ class Reader(Protocol):
     async def fetch_recent(self, count: int = 20) -> list[SourcePost]: ...
 
 
-async def run_forever(reader: Reader, pipeline: EmergencyPipeline, stop: asyncio.Event, interval_seconds: float = 10) -> None:
+async def run_forever(reader: Reader, pipeline: EmergencyPipeline, stop: asyncio.Event, interval_seconds: float = 10) -> bool:
     if interval_seconds <= 0:
         raise ValueError("poll interval must be positive")
     failures = 0
@@ -54,8 +54,17 @@ async def run_forever(reader: Reader, pipeline: EmergencyPipeline, stop: asyncio
             "INSERT OR REPLACE INTO service_state VALUES (?, ?)",
             metrics.items(),
         )
+        if error_type and not _reader_is_connected(reader):
+            logger.warning("Emergency MAX connection is closed; requesting a fresh session")
+            return True
         delay = max(interval_seconds, min(300, interval_seconds * 2 ** min(failures, 8)))
         try:
             await asyncio.wait_for(stop.wait(), timeout=delay)
         except TimeoutError:
             pass
+    return False
+
+
+def _reader_is_connected(reader: Reader) -> bool:
+    client = getattr(reader, "client", None)
+    return client is None or bool(getattr(client, "is_connected", True))

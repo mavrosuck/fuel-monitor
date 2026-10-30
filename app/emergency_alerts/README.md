@@ -102,8 +102,10 @@ Never place the token or session in source control, command arguments or logs.
 The state and session directories must be private and writable by the container's
 `app` user. The service polls every 30 seconds by default, accepts only 10..300
 seconds, backs off up to five minutes after repeated failures, restarts unless
-stopped and exposes a local health check. Monitor that health status and back up
-SQLite consistently with its WAL.
+stopped and exposes a local health check. If its authorized MAX WebSocket closes,
+the worker closes it and opens a fresh read-only session before continuing; it
+does not reset the SQLite baseline or retry an uncertain Telegram delivery.
+Monitor that health status and back up SQLite consistently with its WAL.
 
 Run `python -m app.emergency_alerts telegram-preflight`, `max-dry-run`, and
 `store-check` on the target environment before setting all activation gates.

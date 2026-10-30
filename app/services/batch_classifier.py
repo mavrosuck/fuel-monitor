@@ -1,11 +1,11 @@
 """One-request classification of a scheduler's accumulated text messages."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
 from app.ai.schema import BatchInput, BatchParseResult, MessageParseResult
-from app.services.keyword_filter import is_keyword_relevant
+from app.services.keyword_filter import keyword_relevance
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class BatchParser(Protocol):
 class BatchClassification:
     locally_irrelevant_ids: set[int]
     results_by_message_id: dict[int, MessageParseResult]
+    local_relevance_reasons: dict[int, str] = field(default_factory=dict)
 
 
 class BatchClassifier:
@@ -30,10 +31,12 @@ class BatchClassifier:
         self.parser = parser
 
     async def classify(self, messages: list[TextMessage]) -> BatchClassification:
-        relevant = [message for message in messages if is_keyword_relevant(message.text)]
-        irrelevant_ids = {message.source_message_id for message in messages if message not in relevant}
+        relevance = {message.source_message_id: keyword_relevance(message.text) for message in messages}
+        relevant = [message for message in messages if relevance[message.source_message_id][0]]
+        irrelevant_ids = {message.source_message_id for message in messages if not relevance[message.source_message_id][0]}
+        reason_codes = {message.source_message_id: relevance[message.source_message_id][1] for message in messages}
         if not relevant:
-            return BatchClassification(irrelevant_ids, {})
+            return BatchClassification(irrelevant_ids, {}, reason_codes)
         result = await self.parser.parse_batch(
             [BatchInput(source_message_id=item.source_message_id, message_date=item.message_date, text=item.text) for item in relevant]
         )
@@ -43,4 +46,4 @@ class BatchClassifier:
             for item in result.results
             if item.source_message_id in valid_ids
         }
-        return BatchClassification(irrelevant_ids, results)
+        return BatchClassification(irrelevant_ids, results, reason_codes)

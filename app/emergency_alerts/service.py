@@ -58,7 +58,6 @@ async def serve() -> None:
 
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    session = AuthorizedMaxSession(session_path, chat_id, True)
     connection = open_store(sqlite_path)
     sender = None
     stop = asyncio.Event()
@@ -68,18 +67,55 @@ async def serve() -> None:
     try:
         sender = EmergencyTelegramSender(bot_token)
         await asyncio.wait_for(sender.verify_destination(), timeout=30)
-        async with asyncio.timeout(60):
-            reader = await session.__aenter__()
-        try:
-            initial_posts = await asyncio.wait_for(reader.fetch_recent(), timeout=30)
-            baseline_count = initialize_without_backfill(connection, initial_posts, datetime.now(UTC))
-            logging.info(
-                "Emergency initial boundary recorded with %d eligible posts; nothing was published",
-                baseline_count,
-            )
-            await run_forever(reader, EmergencyPipeline(connection, OriginalRewriter(), sender), stop, interval)
-        finally:
-            await session.__aexit__()
+        reconnect_attempts = 0
+        while not stop.is_set():
+            try:
+                session = AuthorizedMaxSession(session_path, chat_id, True)
+                async with asyncio.timeout(60):
+                    reader = await session.__aenter__()
+                try:
+                    initial_posts = await asyncio.wait_for(reader.fetch_recent(), timeout=30)
+                    baseline_count = initialize_without_backfill(connection, initial_posts, datetime.now(UTC))
+                    logging.info(
+                        "Emergency initial boundary recorded with %d eligible posts; nothing was published",
+                        baseline_count,
+                    )
+                    reconnect_required = await run_forever(
+                        reader,
+                        EmergencyPipeline(connection, OriginalRewriter(), sender),
+                        stop,
+                        interval,
+                    )
+                finally:
+                    await session.__aexit__(None, None, None)
+                if not reconnect_required:
+                    break
+                reconnect_attempts += 1
+                logging.warning("Emergency MAX session closed; reconnecting with the existing read-only session")
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                reconnect_attempts += 1
+                checked_at = datetime.now(UTC).isoformat()
+                connection.execute(
+                    "INSERT OR REPLACE INTO worker_health VALUES (1, ?, 'error')",
+                    (checked_at,),
+                )
+                connection.executemany(
+                    "INSERT OR REPLACE INTO service_state VALUES (?, ?)",
+                    {
+                        "last_poll_completed_at": checked_at,
+                        "last_poll_post_count": "0",
+                        "consecutive_poll_failures": str(reconnect_attempts),
+                        "last_poll_error_type": type(error).__name__,
+                    }.items(),
+                )
+                logging.error("Emergency MAX session setup failed: %s", type(error).__name__)
+            delay = min(300, interval * 2 ** min(reconnect_attempts, 4))
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=delay)
+            except TimeoutError:
+                pass
     finally:
         if sender is not None:
             await sender.close()

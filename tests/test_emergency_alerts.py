@@ -599,6 +599,25 @@ def test_worker_recovers_after_read_error(tmp_path):
     connection.close()
 
 
+def test_worker_requests_fresh_session_after_closed_connection(tmp_path):
+    connection = open_store(str(tmp_path / "state.db"))
+    stop = asyncio.Event()
+
+    class ReaderStub:
+        client = SimpleNamespace(is_connected=False)
+
+        async def fetch_recent(self, count=20):
+            raise ConnectionError("connection closed")
+
+    pipeline = EmergencyPipeline(connection, FakeRewriter(), FakeSender())
+
+    assert asyncio.run(run_forever(ReaderStub(), pipeline, stop, interval_seconds=0.001)) is True
+    assert connection.execute("SELECT status FROM worker_health").fetchone() == ("error",)
+    metrics = dict(connection.execute("SELECT key, value FROM service_state").fetchall())
+    assert metrics["last_poll_error_type"] == "ConnectionError"
+    connection.close()
+
+
 def test_unknown_send_result_is_not_retried(tmp_path):
     connection = open_store(str(tmp_path / "state.db"))
     source = post("В Оренбуржье объявлена опасность атаки БПЛА.")

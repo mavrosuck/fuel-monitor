@@ -56,7 +56,7 @@ def test_one_aggregated_fuel_fact_is_a_successful_skipped_run(monkeypatch, caplo
         timezone="Asia/Yekaterinburg",
         health_state_path=str(tmp_path / "health.json"),
     )
-    messages = [CollectedMessage("telegram", 1, 1, datetime(2026, 9, 14, 12, tzinfo=UTC), "АИ-95 есть")]
+    messages = [CollectedMessage("telegram", 1, 1, datetime(2026, 9, 14, 12, tzinfo=UTC), "АИ-95 есть", "GdeBenzin56")]
 
     class FakeTelegramCollector:
         def __init__(self, _settings) -> None:
@@ -95,7 +95,9 @@ def test_one_aggregated_fuel_fact_is_a_successful_skipped_run(monkeypatch, caplo
 
     with caplog.at_level(logging.INFO):
         assert asyncio.run(runner.run_once(datetime(2026, 9, 14, 13, tzinfo=UTC))) is None
-    assert "Publication: skipped (<2 fuel facts)" in caplog.text
+    assert "Publication: skipped reason=below_minimum_fuel_facts publishable_facts=1 min_reports_to_publish=2" in caplog.text
+    assert "Diagnostics: collected_by_source telegram#1=1 telegram#2=0" in caplog.text
+    assert "GdeBenzin56" not in caplog.text
     health = HealthStateStore(settings.health_state_path, settings.timezone).load(datetime(2026, 9, 14, 13, tzinfo=UTC))
     assert health.daily.successful_runs == 1
     assert health.daily.failed_runs == 0

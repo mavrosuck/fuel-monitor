@@ -86,10 +86,10 @@ class MaxCollector:
             missing = set(self.settings.max_source_chat_ids) - set(chats_by_id)
             if missing:
                 raise MaxCollectionError("one or more required MAX chats are unavailable")
-            for chat_id in self.settings.max_source_chat_ids:
+            for source_index, chat_id in enumerate(self.settings.max_source_chat_ids, start=1):
                 chat = chats_by_id[chat_id]
                 titles[chat_id] = str(chat.title or "(без названия)")
-                logger.info("MAX: fetching chat %s", chat_id)
+                logger.info("MAX: fetching configured source %d", source_index)
                 history = await self._fetch_hour(client, chat_id, start, end)
                 for message in history:
                     collected.append(
