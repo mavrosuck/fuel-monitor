@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import Bot
+from aiogram.enums import ParseMode
 
 from app.emergency_alerts.core import TARGET_CHANNEL
 
@@ -35,7 +36,12 @@ class EmergencyTelegramSender:
             raise ValueError("unauthorized emergency destination")
         if not self._verified:
             await self.verify_destination()
-        message = await self.bot.send_message(self._chat_id, text, disable_web_page_preview=True)
+        message = await self.bot.send_message(
+            self._chat_id,
+            text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
         return str(message.message_id)
 
     async def close(self) -> None:

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from aiogram.enums import ChatMemberStatus
+from aiogram.enums import ParseMode
 
 from app.emergency_alerts.core import (
     SOURCE_CHANNEL,
@@ -21,6 +22,7 @@ from app.emergency_alerts.core import (
     record_removal,
     record_baseline_observations,
     register_post,
+    render,
 )
 from app.emergency_alerts import __main__ as emergency_cli
 from app.emergency_alerts.max_source import AuthorizedMaxSession, PreparedMaxReader, from_verified_message
@@ -130,6 +132,43 @@ def test_rewrite_preserves_numbers_status_and_vocabulary():
     ):
         with pytest.raises(ValueError):
             validate_rewrite(original, candidate)
+
+
+@pytest.mark.parametrize(("text", "headline"), [
+    (
+        "В Оренбуржье объявлена опасность атаки БПЛА.",
+        "Опасность атаки БПЛА объявлена в Оренбуржье",
+    ),
+    (
+        "В Оренбургской области отбой опасности атаки БПЛА.",
+        "Отбой опасности атаки БПЛА в Оренбургской области",
+    ),
+])
+def test_render_uses_short_factual_html_alerts(text, headline):
+    message = render(post(text), text)
+    assert message == f"❗️ <b>{headline}</b>\n\n{text}"
+    assert "Источник:" not in message
+    assert "ID публикации" not in message
+    assert SOURCE_CHANNEL not in message
+
+
+def test_render_keeps_road_facts_in_order_and_removes_metadata():
+    text = (
+        "На Загородном шоссе (км 0+000 — км 0+200) закрыли проезд для всех видов транспорта. "
+        "Также перекрыли участок дороги Сырт — Родничный Дол (км 0+000 — км 9+760). "
+        "Временно нет проезда на подъезде к Оренбургу от автодороги М-5 «Урал» (км 0+000 — км 2+270).\n\n"
+        "Источник: https://max.ru/id5610084427_gos\nID публикации MAX: 123\n#МЧС"
+    )
+    message = render(post(text), text)
+    assert message.startswith("❗️ <b>Ограничение движения на дорогах в Оренбургской области</b>\n\n")
+    assert "км 0+000 — км 0+200" in message
+    assert "Сырт — Родничный Дол (км 0+000 — км 9+760)" in message
+    assert "М-5 «Урал» (км 0+000 — км 2+270)" in message
+    assert message.count("\n\n") == 3
+    assert "Источник:" not in message
+    assert "https://max.ru" not in message
+    assert "ID публикации" not in message
+    assert "#МЧС" not in message
 
 
 def test_store_restarts_stale_edits_and_destination(tmp_path):
@@ -242,8 +281,9 @@ def test_pipeline_dedup_rewrite_failure_and_original(tmp_path):
     assert asyncio.run(pipeline.process(source, NOW))
     assert not asyncio.run(pipeline.process(source, NOW))
     assert sender.sent[0][0] == TARGET_CHANNEL
-    assert "Оригинал: " + source.text in sender.sent[0][1]
-    assert source.post_url in sender.sent[0][1]
+    assert sender.sent[0][1] == "❗️ <b>Опасность атаки БПЛА объявлена в Оренбуржье</b>\n\nВ Оренбуржье объявлена опасность атаки БПЛА."
+    assert "Источник:" not in sender.sent[0][1]
+    assert source.post_url not in sender.sent[0][1]
     assert connection.execute("SELECT status, remote_id, sent_at FROM deliveries").fetchone()[0:2] == ("sent", "123")
     connection.close()
 
@@ -334,6 +374,8 @@ def test_github_state_checkpoint_uses_lease_and_keeps_single_encrypted_commit(tm
 
 
 def test_telegram_sender_enforces_target_without_network(monkeypatch):
+    sent_options = []
+
     class BotStub:
         def __init__(self, token):
             self.token = token
@@ -351,6 +393,7 @@ def test_telegram_sender_enforces_target_without_network(monkeypatch):
 
         async def send_message(self, destination, text, **kwargs):
             assert destination == -9
+            sent_options.append(kwargs)
             return SimpleNamespace(message_id=9)
 
     monkeypatch.setenv("BOT_TOKEN", "fuel-token")
@@ -360,6 +403,7 @@ def test_telegram_sender_enforces_target_without_network(monkeypatch):
     with pytest.raises(ValueError):
         asyncio.run(sender.send("@other", "text"))
     assert asyncio.run(sender.send(TARGET_CHANNEL, "text")) == "9"
+    assert sent_options == [{"parse_mode": ParseMode.HTML, "disable_web_page_preview": True}]
 
 
 def test_telegram_preflight_rejects_wrong_chat():
@@ -548,7 +592,7 @@ def test_github_poller_is_run_once_encrypted_and_separate_from_fuel_workflow():
     assert "timeout-minutes: 4" in workflow
     assert "group: emergency-mchs-github-poller" in workflow
     assert "secrets.EMERGENCY_STATE_KEY_B64" in workflow
-    assert "vars.EMERGENCY_GITHUB_PUBLISH_ENABLED" in workflow
+    assert 'EMERGENCY_GITHUB_PUBLISH_ENABLED: "false"' in workflow
     assert "emergency-runtime-state" in workflow
     assert 'workflows: ["Fuel monitor"]' in workflow
     assert "github.event.workflow_run.head_repository.full_name == github.repository" in workflow

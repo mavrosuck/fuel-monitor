@@ -31,7 +31,7 @@ jobs:
       EMERGENCY_MAX_PERMISSION_CONFIRMED: "true"
       EMERGENCY_SOURCE_VERIFIED: "true"
       EMERGENCY_MAX_CHANNEL_ID: "-69537682153611"
-      EMERGENCY_GITHUB_PUBLISH_ENABLED: ${{ vars.EMERGENCY_GITHUB_PUBLISH_ENABLED == 'true' && 'true' || 'false' }}
+      EMERGENCY_GITHUB_PUBLISH_ENABLED: "false"
       EMERGENCY_STATE_BRANCH: emergency-runtime-state
       EMERGENCY_STATE_REPOSITORY: /tmp/fuel-monitor-emergency-state
       EMERGENCY_STATE_ENCRYPTED_PATH: /tmp/fuel-monitor-emergency-state/emergency-state.aesgcm

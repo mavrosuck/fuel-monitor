@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import re
 import sqlite3
@@ -71,16 +72,63 @@ def event_transition(post: SourcePost) -> str | None:
 def render(post: SourcePost, rewritten: str) -> str:
     if classify(post) is None or not rewritten.strip():
         raise ValueError("post is not eligible")
-    published = post.published_at.astimezone(ORENBURG_TIME).strftime("%d.%m.%Y %H:%M")
-    excerpt = "" if rewritten.strip() == post.text.strip() else f"{rewritten.strip()}\n\n"
-    message = (
-        f"МЧС Оренбургской области · {published} (Оренбург)\n\n"
-        f"{excerpt}Оригинал: {post.text.strip()}\n\n"
-        f"Источник: {post.channel_url}\nID публикации MAX: {post.post_id}"
-    )
+    body = _editorial_body(rewritten, event_transition(post))
+    if not body:
+        raise ValueError("post has no publishable editorial body")
+    message = f"❗️ <b>{html.escape(_headline(post))}</b>\n\n{html.escape(body)}"
     if len(message) > 4096:
         raise ValueError("emergency message exceeds Telegram limit")
     return message
+
+
+def _headline(post: SourcePost) -> str:
+    transition = event_transition(post)
+    text = post.text.casefold().replace("ё", "е")
+    if transition == "threat_announced":
+        if "бпла" in text or "беспилот" in text:
+            return "Опасность атаки БПЛА объявлена в Оренбуржье"
+        return "В Оренбургской области объявлена опасность"
+    if transition == "threat_cleared":
+        if "бпла" in text or "беспилот" in text:
+            return "Отбой опасности атаки БПЛА в Оренбургской области"
+        return "Отбой опасности в Оренбургской области"
+    if transition == "road_restricted":
+        return "Ограничение движения на дорогах в Оренбургской области"
+    if transition == "road_reopened":
+        return "Движение на дорогах в Оренбургской области восстановлено"
+    if transition == "kover_introduced":
+        return "В Оренбурге введён режим «Ковёр»"
+    if transition == "kover_lifted":
+        return "В Оренбурге отменён режим «Ковёр»"
+    raise ValueError("post has no editorial headline")
+
+
+def _editorial_body(text: str, transition: str | None) -> str:
+    paragraphs = []
+    for raw_paragraph in re.split(r"\n\s*\n", text.strip()):
+        lines = []
+        for raw_line in raw_paragraph.splitlines():
+            line = raw_line.strip()
+            if not line or _is_metadata_line(line):
+                continue
+            line = re.sub(r"https?://\S+", "", line, flags=re.IGNORECASE)
+            line = re.sub(r"(?<!\w)#[\w-]+", "", line)
+            line = re.sub(r"\s+", " ", line).strip(" ,;:-")
+            if line:
+                lines.append(line)
+        paragraph = " ".join(lines)
+        if paragraph:
+            paragraphs.append(paragraph)
+    if transition in {"road_restricted", "road_reopened"} and len(paragraphs) == 1:
+        sentences = [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", paragraphs[0]) if sentence.strip()]
+        if len(sentences) > 1 and sum("км" in sentence.casefold() for sentence in sentences) >= 2:
+            paragraphs = sentences
+    return "\n\n".join(paragraphs)
+
+
+def _is_metadata_line(line: str) -> bool:
+    lowered = line.casefold()
+    return bool(re.match(r"(?:источник|id(?: публикации)?(?: max)?|max(?: chat_id)?|post_id|uuid|timestamp)\s*:", lowered))
 
 
 def revision(post: SourcePost) -> str:
