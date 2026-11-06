@@ -3,7 +3,7 @@ from __future__ import annotations
 from aiogram import Bot
 from aiogram.enums import ParseMode
 
-from app.emergency_alerts.core import TARGET_CHANNEL
+from app.emergency_alerts.core import TARGET_CHANNEL, TARGET_CHAT_ID
 
 
 class EmergencyTelegramSender:
@@ -20,8 +20,8 @@ class EmergencyTelegramSender:
         if self._verified:
             return
         bot = await self.bot.get_me()
-        chat = await self.bot.get_chat(TARGET_CHANNEL)
-        if str(getattr(chat, "username", "")).casefold() != TARGET_CHANNEL[1:] or getattr(chat, "type", None) != "channel":
+        chat = await self.bot.get_chat(TARGET_CHAT_ID)
+        if getattr(chat, "id", None) != TARGET_CHAT_ID or getattr(chat, "type", None) != "channel":
             raise ValueError("Telegram destination identity mismatch")
         membership = await self.bot.get_chat_member(chat.id, bot.id)
         if getattr(membership, "status", None) not in {"administrator", "creator"}:

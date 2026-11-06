@@ -5,8 +5,9 @@
 The emergency worker is independent from the two-hour fuel-summary runner. It
 reads only the official public MAX channel `https://max.ru/id5610084427_gos`
 through an existing personal `pymax.WebClient` session and can deliver only to
-Telegram `@benzinoren`. It contains no MAX send, reaction, comment, join,
-subscription or settings operation.
+the Telegram channel with immutable ID `-1002318867305` (currently
+`@accentoren`, previously `@benzinoren`). It contains no MAX send, reaction,
+comment, join, subscription or settings operation.
 
 The user reports that MAX has consented to this automated personal-session read.
 That consent remains an operator-controlled prerequisite. Before network or
@@ -76,8 +77,9 @@ transactionally blocked. A send with an uncertain result remains `claimed` for
 manual reconciliation and is not retried blindly. Edits and verified removals
 enter review states.
 
-Before any send, the Telegram adapter confirms that the existing bot is an
-administrator of exactly `@benzinoren` and has posting rights. The manual
+Before any send, the Telegram adapter resolves the immutable channel ID,
+confirms the exact identity and verifies that the existing bot is an
+administrator with posting rights. The manual
 `Emergency Telegram preflight` workflow performs only identity, chat and rights
 requests; it never calls `send_message`.
 

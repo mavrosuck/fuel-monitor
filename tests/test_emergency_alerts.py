@@ -13,6 +13,7 @@ from app.emergency_alerts.core import (
     SOURCE_CHANNEL,
     SOURCE_CHAT_ID,
     TARGET_CHANNEL,
+    TARGET_CHAT_ID,
     SourcePost,
     claim_delivery,
     classify,
@@ -384,15 +385,15 @@ def test_telegram_sender_enforces_target_without_network(monkeypatch):
             return SimpleNamespace(id=7)
 
         async def get_chat(self, destination):
-            assert destination == TARGET_CHANNEL
-            return SimpleNamespace(id=-9, username="benzinoren", type="channel")
+            assert destination == TARGET_CHAT_ID
+            return SimpleNamespace(id=TARGET_CHAT_ID, username="accentoren", type="channel")
 
         async def get_chat_member(self, chat_id, user_id):
-            assert (chat_id, user_id) == (-9, 7)
+            assert (chat_id, user_id) == (TARGET_CHAT_ID, 7)
             return SimpleNamespace(status=ChatMemberStatus.ADMINISTRATOR, can_post_messages=True)
 
         async def send_message(self, destination, text, **kwargs):
-            assert destination == -9
+            assert destination == TARGET_CHAT_ID
             sent_options.append(kwargs)
             return SimpleNamespace(message_id=9)
 
@@ -415,6 +416,7 @@ def test_telegram_preflight_rejects_wrong_chat():
             return SimpleNamespace(id=7)
 
         async def get_chat(self, destination):
+            assert destination == TARGET_CHAT_ID
             return SimpleNamespace(id=-9, username="other", type="channel")
 
         async def send_message(self, *args, **kwargs):

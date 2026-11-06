@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 SOURCE_CHANNEL = "https://max.ru/id5610084427_gos"
 SOURCE_CHAT_ID = -69537682153611
 TARGET_CHANNEL = "@benzinoren"
+TARGET_CHAT_ID = -1002318867305
 ORENBURG_TIME = ZoneInfo("Asia/Yekaterinburg")
 MAX_AGE = timedelta(minutes=15)
 
